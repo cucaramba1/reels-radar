@@ -28,7 +28,7 @@ def test_ok_friend_only_writes_nothing(db, tmp_path):
     db.add_item("A", "u", "", 1)
     save_verdict(db, "A", v(["friend"]))
     apply_action(db, "A", "ok", THEMES, tmp_path)
-    assert db.get("A")["status"] == "approved" and not list(tmp_path.iterdir())
+    assert db.get("A")["status"] == "approved" and not [p for p in tmp_path.iterdir() if p.name != "t.db"]
 
 
 def test_no_rejects_and_theme_change(db, tmp_path):
