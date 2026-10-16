@@ -1,0 +1,12 @@
+data_dir: data
+reels_tools: /Users/cucaramba/Claude Code/tools/reels
+reels_pipeline: /Users/cucaramba/Claude Code/reels_pipeline
+claude_bin: claude
+whisper_bin: /Users/cucaramba/.local/share/uv/tools/mlx-whisper/bin/mlx_whisper
+whisper_model: mlx-community/whisper-large-v3-turbo
+select_threshold: 30
+max_frames: 6
+batch_size: 20
+min_free_gb: 3
+claude_timeout: 300
+keywords: [claude, клод, mcp, скилл, промпт, монтаж, съёмка, хук, нячанг, йога, продуктивность]
