@@ -30,7 +30,7 @@ async def run_batch(s, db, themes, *, fetch, local, classify, limit=None) -> dic
             lr = local(video, work, r["caption"])
             db.update(code, transcript=lr.transcript, ocr_text=lr.ocr_text, score=lr.score)
             if lr.score < s.select_threshold:
-                db.update(code, status="archived"); stats["archived"] += 1
+                db.update(code, status="archived", fail_reason=None); stats["archived"] += 1
                 continue
             try:
                 v = await classify(db.get(code), lr)

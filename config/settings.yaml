@@ -4,7 +4,7 @@ reels_pipeline: /Users/cucaramba/Claude Code/reels_pipeline
 claude_bin: /Users/cucaramba/.npm-global/bin/claude
 whisper_bin: /Users/cucaramba/.local/share/uv/tools/mlx-whisper/bin/mlx_whisper
 whisper_model: mlx-community/whisper-large-v3-turbo
-select_threshold: 20
+select_threshold: 10
 max_frames: 6
 batch_size: 20
 min_free_gb: 3

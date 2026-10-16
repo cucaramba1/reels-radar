@@ -43,3 +43,8 @@ def test_validate_scrubs_owner_and_handles():
     v = validate(raw, THEMES, owner="lena_derbeneva")
     blob = " ".join([v.summary, v.title, v.body, v.template]).lower()
     assert "lena_derbeneva" not in blob and "@" not in blob
+
+
+def test_prompt_does_not_skip_funnels():
+    from reels_radar.vision import SYSTEM
+    assert "призыв" in SYSTEM and "воронк" not in SYSTEM.split("skip=true")[1]
