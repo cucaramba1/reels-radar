@@ -31,3 +31,11 @@ def test_all_fail_is_no_video(tmp_path):
 def test_ok_without_file_continues(tmp_path):
     st, path = fetch_chain("u", tmp_path, [mk("OK", False), mk("OK", True)])
     assert st == "OK" and path is not None
+
+
+def test_image_only_post_is_ok_with_dir(tmp_path):
+    def gdl(url, dest):
+        (dest / "1.jpg").write_bytes(b"x"); (dest / "2.jpg").write_bytes(b"x")
+        return "OK"
+    st, path = fetch_chain("u", tmp_path, [mk("NO_VIDEO"), gdl])
+    assert st == "OK" and path == tmp_path

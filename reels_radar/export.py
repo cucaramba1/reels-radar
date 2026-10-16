@@ -14,6 +14,7 @@ class Parsed:
     caption: str
     ts: int
     folder: str | None = None
+    owner: str = ""
 
 
 def fix(s) -> str:
@@ -51,18 +52,22 @@ def _saved_posts(path) -> list[Parsed]:
     for p in data:
         if not isinstance(p, dict):
             continue
-        url, cap = "", ""
+        url, cap, owner = "", "", ""
         for lv in p.get("label_values", []):
             if not isinstance(lv, dict):
                 continue
+            for d in lv.get("dict") or []:
+                for dd in (d.get("dict") or []) if isinstance(d, dict) else []:
+                    if isinstance(dd, dict) and fix(dd.get("label", "")) in ("Имя пользователя", "Username"):
+                        owner = str(dd.get("value") or "")
             label = fix(lv.get("label", ""))
             if label == "URL":
                 url = lv.get("value", "")
-            elif label.startswith("Опис"):
+            elif label.startswith("Опис") or label == "Caption":
                 cap = fix(lv.get("value", ""))
         code = shortcode(url)
         if code:
-            out.append(Parsed(code, canonical(code), cap, _int(p.get("timestamp"))))
+            out.append(Parsed(code, canonical(code), cap, _int(p.get("timestamp")), None, owner))
     return out
 
 

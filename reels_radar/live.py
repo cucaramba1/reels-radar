@@ -30,6 +30,6 @@ async def run_live(s, db, themes, limit=None):
 
     async def cls(row, lr):
         it = It(); it.code, it.caption = row["code"], row["caption"]
-        return await classify(s, themes, it, lr, folder_theme=row["folder"])
+        return await classify(s, themes, it, lr, folder_theme=row["folder"], owner=row["owner"] or "")
 
     return await run_batch(s, db, themes, fetch=fetch, local=local, classify=cls, limit=limit)

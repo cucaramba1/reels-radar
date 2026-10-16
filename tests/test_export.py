@@ -50,3 +50,19 @@ def test_url_is_rebuilt_from_code_no_argv_injection(tmp_path):
         {"timestamp": 1, "label_values": [{"label": "URL", "value": "--exec=evil instagram.com/reel/Ab_1/"}]}]))
     it = parse_export(tmp_path)[0]
     assert it.url == "https://www.instagram.com/reel/Ab_1/"
+
+
+def test_owner_is_parsed_from_saved_posts(tmp_path):
+    (tmp_path / "saved_posts.json").write_text(json.dumps([{"timestamp": 1, "label_values": [
+        {"label": "URL", "value": "https://www.instagram.com/reel/OW1/"},
+        {"dict": [{"dict": [{"label": mojibake("Имя пользователя"), "value": "some_author"}]}]}]}]))
+    assert parse_export(tmp_path)[0].owner == "some_author"
+
+
+def test_english_labels_caption_and_owner(tmp_path):
+    (tmp_path / "saved_posts.json").write_text(json.dumps([{"timestamp": 1, "label_values": [
+        {"label": "URL", "value": "https://www.instagram.com/reel/EN1/"},
+        {"label": "Caption", "value": mojibake("Подпись рилса")},
+        {"dict": [{"dict": [{"label": "Username", "value": "en_author"}]}]}]}]))
+    it = parse_export(tmp_path)[0]
+    assert it.caption == "Подпись рилса" and it.owner == "en_author"

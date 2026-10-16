@@ -59,7 +59,15 @@ def run_ocr(ocr_bin: Path, paths: list[Path]) -> list[str]:
     return [b.strip() for b in r.stdout.split("=====")]
 
 
+def has_audio(video: Path) -> bool:
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+                        "-of", "csv=p=0", str(video)], capture_output=True, text=True, timeout=60)
+    return bool(r.stdout.strip())
+
+
 def transcribe(whisper_bin: str, model: str, video: Path, tmp: Path) -> str:
+    if not has_audio(video):
+        return ""  # беззвучный ролик: речи нет, это не сбой
     tmp.mkdir(parents=True, exist_ok=True)
     p = subprocess.run([whisper_bin, str(video), "--model", model, "--output-format", "txt",
                         "--output-dir", str(tmp), "--verbose", "False", "--condition-on-previous-text", "False"],
@@ -72,7 +80,13 @@ def transcribe(whisper_bin: str, model: str, video: Path, tmp: Path) -> str:
 
 
 def analyze_local(s: Settings, video: Path, workdir: Path, caption: str = "") -> LocalResult:
-    frames = extract_frames(video, workdir / "frames", s.max_frames)
+    video = Path(video)
+    if video.is_dir():  # карусель: слайды вместо кадров, речи нет
+        from .fetch import images
+        frames = images(video)[: s.max_frames]
+        transcript = ""
+    else:
+        frames = extract_frames(video, workdir / "frames", s.max_frames)
+        transcript = transcribe(s.whisper_bin, s.whisper_model, video, workdir / "stt")
     ocr_text = " / ".join(clean_lines(run_ocr(s.reels_tools / "ocr", frames)))
-    transcript = transcribe(s.whisper_bin, s.whisper_model, video, workdir / "stt")
     return LocalResult(transcript, ocr_text, score(transcript, ocr_text, caption, s.keywords), frames)

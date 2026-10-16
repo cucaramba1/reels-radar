@@ -7,7 +7,7 @@ from pathlib import Path
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
   code TEXT PRIMARY KEY, url TEXT NOT NULL, caption TEXT NOT NULL DEFAULT '',
-  ts INTEGER NOT NULL DEFAULT 0, folder TEXT,
+  ts INTEGER NOT NULL DEFAULT 0, folder TEXT, owner TEXT,
   status TEXT NOT NULL DEFAULT 'new', attempts INTEGER NOT NULL DEFAULT 0, fail_reason TEXT,
   ocr_text TEXT, transcript TEXT, score REAL,
   theme TEXT, purposes TEXT, kind TEXT, summary TEXT, template TEXT, title TEXT, body TEXT,
@@ -18,7 +18,7 @@ CREATE INDEX IF NOT EXISTS items_status ON items(status);
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 """
 
-FIELDS = {"url", "caption", "ts", "folder", "status", "attempts", "fail_reason", "ocr_text", "transcript",
+FIELDS = {"url", "caption", "ts", "folder", "owner", "status", "attempts", "fail_reason", "ocr_text", "transcript",
           "score", "theme", "purposes", "kind", "summary", "template", "title", "body", "note_path",
           "note_created", "moc_line"}
 
@@ -29,11 +29,16 @@ class DB:
         self.c = sqlite3.connect(str(path))
         self.c.row_factory = sqlite3.Row
         self.c.executescript(SCHEMA)
+        try:
+            self.c.execute("ALTER TABLE items ADD COLUMN owner TEXT")
+            self.c.commit()
+        except sqlite3.OperationalError:
+            pass  # колонка уже есть
 
-    def add_item(self, code, url, caption, ts, folder=None) -> bool:
+    def add_item(self, code, url, caption, ts, folder=None, owner=None) -> bool:
         cur = self.c.execute(
-            "INSERT OR IGNORE INTO items(code,url,caption,ts,folder,updated) VALUES(?,?,?,?,?,?)",
-            (code, url, caption, ts, folder, datetime.now().isoformat()))
+            "INSERT OR IGNORE INTO items(code,url,caption,ts,folder,owner,updated) VALUES(?,?,?,?,?,?,?)",
+            (code, url, caption, ts, folder, owner, datetime.now().isoformat()))
         self.c.commit()
         return cur.rowcount == 1
 

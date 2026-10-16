@@ -6,11 +6,16 @@ from pathlib import Path
 from typing import Callable
 
 VID = {".mp4", ".mov", ".webm"}
+IMG = {".jpg", ".jpeg", ".png", ".webp"}
 Fetcher = Callable[[str, Path], str]
 
 
 def _video(dest: Path) -> Path | None:
     return next((p for p in sorted(Path(dest).glob("*")) if p.suffix.lower() in VID), None)
+
+
+def images(dest: Path) -> list[Path]:
+    return [p for p in sorted(Path(dest).glob("*")) if p.suffix.lower() in IMG]
 
 
 def _classify(err: str) -> str | None:
@@ -52,6 +57,8 @@ def fetch_chain(url: str, dest: Path, fetchers: list[Fetcher]) -> tuple[str, Pat
             v = _video(dest)
             if v:
                 return "OK", v
+            if images(dest):
+                return "OK", dest  # карусель из фото: дальше OCR слайдов, без расшифровки речи
             st = "NO_VIDEO"
         last = st
     return ("LOGIN" if last == "LOGIN" else "NO_VIDEO"), None

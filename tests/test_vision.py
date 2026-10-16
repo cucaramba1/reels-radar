@@ -33,3 +33,13 @@ def test_classify_uses_claude_and_validates():
     class Local: transcript, ocr_text, frames = "т", "о", []
     v = asyncio.run(classify(S(), THEMES, Item(), Local(), claude=fake))
     assert v.theme == "ИИ" and v.purposes == ["claude", "note"]
+
+
+def test_validate_scrubs_owner_and_handles():
+    raw = {"theme": "ИИ", "purposes": ["note"], "kind": "знание",
+           "summary": "автор lena_derbeneva показал, пишет @someone.else тоже",
+           "template": "", "title": "Метод Lena_Derbeneva", "body": "от @a_b_c и lena_derbeneva",
+           "skip": False, "reason": ""}
+    v = validate(raw, THEMES, owner="lena_derbeneva")
+    blob = " ".join([v.summary, v.title, v.body, v.template]).lower()
+    assert "lena_derbeneva" not in blob and "@" not in blob

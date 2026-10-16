@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .claude import run_claude
@@ -40,17 +41,27 @@ class Verdict:
     reason: str = ""
 
 
-def _clean(s: str) -> str:
-    return (s or "").replace("—", "-").strip()
+HANDLE = re.compile(r"@[\w.]+")
 
 
-def validate(raw: dict, themes: dict[str, Theme]) -> Verdict:
+def _scrub(s: str, owner: str = "") -> str:
+    s = HANDLE.sub("", s or "")
+    if owner:
+        s = re.sub(re.escape(owner), "автор", s, flags=re.I)
+    return s
+
+
+def _clean(s: str, owner: str = "") -> str:
+    return _scrub(s, owner).replace("—", "-").strip()
+
+
+def validate(raw: dict, themes: dict[str, Theme], owner: str = "") -> Verdict:
     theme = raw.get("theme") if raw.get("theme") in themes else "Разное"
     purposes = [p for p in raw.get("purposes", []) if p in PURPOSES] or ["note"]
     kind = raw.get("kind") if raw.get("kind") in KINDS else "знание"
-    return Verdict(theme, purposes, kind, _clean(raw.get("summary")), _clean(raw.get("template")),
-                   _clean(raw.get("title"))[:80], _clean(raw.get("body")), bool(raw.get("skip")),
-                   _clean(raw.get("reason")))
+    c = lambda k: _clean(raw.get(k), owner)  # noqa: E731
+    return Verdict(theme, purposes, kind, c("summary"), c("template"), c("title")[:80], c("body"),
+                   bool(raw.get("skip")), c("reason"))
 
 
 def build_prompt(code, caption, transcript, ocr_text, frames, themes, folder_theme) -> str:
@@ -63,10 +74,10 @@ def build_prompt(code, caption, transcript, ocr_text, frames, themes, folder_the
     return "\n".join(parts)
 
 
-async def classify(s, themes, item, local, claude=run_claude, folder_theme=None) -> Verdict:
+async def classify(s, themes, item, local, claude=run_claude, folder_theme=None, owner="") -> Verdict:
     prompt = build_prompt(item.code, item.caption, local.transcript, local.ocr_text, local.frames,
                           themes, folder_theme)
     dirs = tuple({str(f.parent) for f in local.frames})
     raw = await claude(s, prompt, system=SYSTEM, schema=SCHEMA, tools=("Read",) if local.frames else (),
                        add_dirs=dirs, timeout=s.claude_timeout)
-    return validate(raw, themes)
+    return validate(raw, themes, owner)

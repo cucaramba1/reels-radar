@@ -41,7 +41,7 @@ def ingest(items: list[Parsed], known: set[str], db: DB) -> int:
     for it in items:
         if it.code in known:
             continue
-        if db.add_item(it.code, it.url, it.caption, it.ts, it.folder):
+        if db.add_item(it.code, it.url, it.caption, it.ts, it.folder, it.owner or None):
             known.add(it.code)
             n += 1
     return n
