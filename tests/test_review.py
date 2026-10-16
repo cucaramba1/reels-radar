@@ -66,3 +66,11 @@ def test_duplicate_title_moc_links_actual_file(db, tmp_path):
         apply_action(db, code, "ok", THEMES, tmp_path)
     moc = (tmp_path / "ИИ работа" / "m.md").read_text()
     assert "[[Заг]]" in moc and "[[Заг (2)]]" in moc
+
+
+def test_theme_without_folder_is_kept_in_db_only(db, tmp_path):
+    themes = {"Юмор": Theme("Юмор", None, None)}
+    db.add_item("A", "u", "", 1)
+    save_verdict(db, "A", Verdict("Юмор", ["note"], "знание", "с", "", "Т", "тело"))
+    assert apply_action(db, "A", "ok", themes, tmp_path) == "тема без папки, сохранено в базе"
+    assert db.get("A")["status"] == "approved" and not [p for p in tmp_path.iterdir() if p.name != "t.db"]

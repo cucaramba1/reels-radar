@@ -34,6 +34,9 @@ def apply_action(db, code, action, themes, vault: Path) -> str:
             db.update(code, status="approved")
             return "сохранено в базе"
         theme = themes[r["theme"]]
+        if not theme.folder:
+            db.update(code, status="approved")
+            return "тема без папки, сохранено в базе"
         path, created = write_note(vault, theme, r["title"], r["body"], code)
         line = add_moc_line(vault, theme, path.stem)
         db.update(code, status="written", note_path=str(path.relative_to(vault)),

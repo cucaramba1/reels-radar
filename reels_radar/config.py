@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 @dataclass(frozen=True)
 class Theme:
     name: str
-    folder: str
-    moc: str
+    folder: str | None
+    moc: str | None
 
 
 @dataclass
@@ -60,4 +60,4 @@ def load_settings(root: Path) -> Settings:
 
 def load_themes(root: Path) -> dict[str, Theme]:
     y = yaml.safe_load((root / "config" / "themes.yaml").read_text())
-    return {n: Theme(n, v["folder"], v["moc"]) for n, v in y["themes"].items()}
+    return {n: Theme(n, v.get("folder"), v.get("moc")) for n, v in y["themes"].items()}
