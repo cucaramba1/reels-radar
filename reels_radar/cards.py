@@ -16,3 +16,7 @@ def keyboard_spec(code: str) -> list[list[tuple[str, str]]]:
 def parse_callback(data: str) -> tuple[str, str]:
     action, code = data.split(":", 1)
     return action, code
+
+
+def theme_cb(idx: int, code: str) -> str:
+    return f"st:{idx}|{code}"

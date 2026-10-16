@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from .cards import keyboard_spec, parse_callback, render_card
+from .cards import keyboard_spec, parse_callback, render_card, theme_cb
 from .review import apply_action
 from .vault import rollback
 
@@ -35,11 +37,11 @@ def router(s, db, themes) -> Router:
     async def cb(q: CallbackQuery):
         action, code = parse_callback(q.data)
         if action == "theme":
-            rows = [[InlineKeyboardButton(text=n, callback_data=f"st:{n}|{code}")] for n in themes]
+            rows = [[InlineKeyboardButton(text=n, callback_data=theme_cb(i, code))] for i, n in enumerate(themes)]
             await q.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
         elif action == "st":
-            name, code = code.split("|", 1)
-            apply_action(db, code, f"set_theme:{name}", themes, s.vault)
+            idx, code = code.split("|", 1)
+            apply_action(db, code, f"set_theme:{list(themes)[int(idx)]}", themes, s.vault)
             await q.message.edit_text(render_card(db.get(code)), reply_markup=kb(code))
         elif action in ("ok", "no"):
             msg = apply_action(db, code, action, themes, s.vault)
@@ -69,5 +71,17 @@ async def run_bot(s, db, themes):
     bot = Bot(s.bot_token)
     dp = Dispatcher()
     dp.include_router(router(s, db, themes))
-    await send_pending(bot, db, s.owner_id)
-    await dp.start_polling(bot)
+
+    async def pump():
+        while True:
+            try:
+                await send_pending(bot, db, s.owner_id)
+            except Exception:
+                pass
+            await asyncio.sleep(300)
+
+    task = asyncio.create_task(pump())
+    try:
+        await dp.start_polling(bot)
+    finally:
+        task.cancel()

@@ -11,3 +11,8 @@ def test_card_has_no_long_dash(db):
     db.update("A", theme="ИИ", purposes="claude,note", kind="фича", summary="суть — вот", template="шаблон")
     text = render_card(db.get("A"))
     assert "—" not in text and "ИИ" in text and "суть" in text
+
+
+def test_theme_callback_fits_telegram_limit():
+    from reels_radar.cards import theme_cb
+    assert len(theme_cb(13, "A" * 11).encode()) <= 64

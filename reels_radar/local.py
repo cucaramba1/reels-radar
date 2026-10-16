@@ -38,9 +38,13 @@ def score(transcript: str, ocr_text: str, caption: str, keywords: list[str]) -> 
 
 def extract_frames(video: Path, out: Path, n: int) -> list[Path]:
     out.mkdir(parents=True, exist_ok=True)
-    dur = float(subprocess.run(
+    raw = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(video)],
-        capture_output=True, text=True, timeout=60).stdout.strip() or 0)
+        capture_output=True, text=True, timeout=60).stdout.strip()
+    try:
+        dur = float(raw)
+    except ValueError:
+        dur = 0.0
     step = max(dur / (n + 1), 0.5)
     for i in range(n):
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-ss", str(step * (i + 1)), "-i", str(video),
@@ -57,11 +61,13 @@ def run_ocr(ocr_bin: Path, paths: list[Path]) -> list[str]:
 
 def transcribe(whisper_bin: str, model: str, video: Path, tmp: Path) -> str:
     tmp.mkdir(parents=True, exist_ok=True)
-    subprocess.run([whisper_bin, str(video), "--model", model, "--output-format", "txt",
-                    "--output-dir", str(tmp), "--verbose", "False", "--condition-on-previous-text", "False"],
-                   capture_output=True, text=True, timeout=900)
+    p = subprocess.run([whisper_bin, str(video), "--model", model, "--output-format", "txt",
+                        "--output-dir", str(tmp), "--verbose", "False", "--condition-on-previous-text", "False"],
+                       capture_output=True, text=True, timeout=900)
     f = tmp / (video.stem + ".txt")
-    text = f.read_text().strip() if f.exists() else ""
+    if p.returncode != 0 or not f.exists():
+        raise RuntimeError(f"whisper failed: {(p.stderr or '')[-200:]}")
+    text = f.read_text().strip()
     return text if len(text) >= 15 else ""
 
 

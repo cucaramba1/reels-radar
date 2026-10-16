@@ -15,6 +15,8 @@ def save_verdict(db, code, v) -> None:
 
 def apply_action(db, code, action, themes, vault: Path) -> str:
     r = db.get(code)
+    if r["status"] != "draft":
+        return "уже обработано"
     if action == "no":
         db.update(code, status="rejected")
         return "отклонено"
@@ -33,7 +35,7 @@ def apply_action(db, code, action, themes, vault: Path) -> str:
             return "сохранено в базе"
         theme = themes[r["theme"]]
         path, created = write_note(vault, theme, r["title"], r["body"], code)
-        line = add_moc_line(vault, theme, r["title"])
+        line = add_moc_line(vault, theme, path.stem)
         db.update(code, status="written", note_path=str(path.relative_to(vault)),
                   note_created=int(created), moc_line=line)
         return f"записано: {path.name}"

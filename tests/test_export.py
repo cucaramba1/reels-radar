@@ -34,3 +34,19 @@ def test_parse_saved_posts(tmp_path):
     items = parse_export(tmp_path)
     assert [i.code for i in items] == ["AAA", "BBB"]
     assert items[0].caption == "Как снимать" and items[1].caption == ""
+
+
+def test_parser_survives_odd_shapes(tmp_path):
+    (tmp_path / "saved_posts.json").write_text(json.dumps({"saved_saved_media": [
+        {"timestamp": None, "label_values": [{"label": "URL", "value": "https://www.instagram.com/reel/OK1/"}]},
+        {"timestamp": 5, "label_values": [{"label": "URL", "value": 123}]},
+        "garbage"]}))
+    (tmp_path / "message_1.json").write_text("{not json")
+    assert [i.code for i in parse_export(tmp_path)] == ["OK1"]
+
+
+def test_url_is_rebuilt_from_code_no_argv_injection(tmp_path):
+    (tmp_path / "saved_posts.json").write_text(json.dumps([
+        {"timestamp": 1, "label_values": [{"label": "URL", "value": "--exec=evil instagram.com/reel/Ab_1/"}]}]))
+    it = parse_export(tmp_path)[0]
+    assert it.url == "https://www.instagram.com/reel/Ab_1/"

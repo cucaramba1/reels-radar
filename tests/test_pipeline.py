@@ -61,4 +61,47 @@ def test_claude_limit_pauses_keeps_local(db, tmp_path):
     db.add_item("A", "u", "c", 1)
     async def limit(row, lr): raise RuntimeError("usage limit reached")
     run(db, tmp_path, fetch=ok_fetch, local=mk_local(80), classify=limit)
-    assert db.kv_get("paused") == "1" and db.get("A")["status"] == "local"
+    assert db.kv_get("paused") == "1" and db.get("A")["status"] == "new"
+
+
+def test_limit_returns_item_to_queue_and_next_run_continues(db, tmp_path):
+    db.add_item("A", "u", "c", 1)
+    async def limit(row, lr): raise RuntimeError("usage limit reached")
+    run(db, tmp_path, fetch=ok_fetch, local=mk_local(80), classify=limit)
+    assert db.get("A")["status"] == "new"
+    run(db, tmp_path, fetch=ok_fetch, local=mk_local(80), classify=ok_classify)
+    assert db.get("A")["status"] == "draft" and db.kv_get("paused") == "0"
+
+
+def test_one_crash_does_not_kill_batch(db, tmp_path):
+    db.add_item("A", "u", "c", 2); db.add_item("B", "u", "c", 1)
+    def flaky(row, w):
+        if row["code"] == "A":
+            raise TimeoutError("yt-dlp hung")
+        return ok_fetch(row, w)
+    run(db, tmp_path, fetch=flaky, local=mk_local(80), classify=ok_classify)
+    assert db.get("A")["status"] == "failed" and db.get("A")["attempts"] == 1
+    assert db.get("B")["status"] == "draft"
+
+
+def test_failed_is_retried_up_to_three(db, tmp_path):
+    db.add_item("A", "u", "c", 1)
+    def boom(row, w): raise TimeoutError("x")
+    for _ in range(5):
+        run(db, tmp_path, fetch=boom, local=mk_local(80), classify=ok_classify)
+    assert db.get("A")["status"] == "failed" and db.get("A")["attempts"] == 3
+
+
+def test_login_pauses_without_burning_attempts(db, tmp_path):
+    db.add_item("A", "u", "c", 1)
+    run(db, tmp_path, fetch=lambda r, w: ("LOGIN", None), local=mk_local(80), classify=ok_classify)
+    r = db.get("A")
+    assert db.kv_get("paused") == "1" and r["status"] == "new" and r["attempts"] == 0
+
+
+def test_whisper_failure_is_failed_not_archived(db, tmp_path):
+    db.add_item("A", "u", "c", 1)
+    def bad_local(video, workdir, caption): raise RuntimeError("whisper failed")
+    async def boom(row, lr): raise AssertionError("no")
+    run(db, tmp_path, fetch=ok_fetch, local=bad_local, classify=boom)
+    assert db.get("A")["status"] == "failed"

@@ -49,3 +49,20 @@ def test_rollback_moves_to_trash_and_cleans_moc(db, tmp_path):
     assert not (tmp_path / rel).exists() and (tmp_path / ".trash" / rel).exists()
     assert "[[Заг]]" not in (tmp_path / "ИИ работа" / "m.md").read_text()
     assert db.get("A")["status"] == "draft"
+
+
+def test_double_ok_writes_once(db, tmp_path):
+    db.add_item("A", "u", "", 1)
+    save_verdict(db, "A", v(["note"]))
+    apply_action(db, "A", "ok", THEMES, tmp_path)
+    assert apply_action(db, "A", "ok", THEMES, tmp_path) == "уже обработано"
+    assert len(list((tmp_path / "ИИ работа").glob("Заг*.md"))) == 1
+
+
+def test_duplicate_title_moc_links_actual_file(db, tmp_path):
+    for code in ("A", "B"):
+        db.add_item(code, "u", "", 1)
+        save_verdict(db, code, v(["note"]))
+        apply_action(db, code, "ok", THEMES, tmp_path)
+    moc = (tmp_path / "ИИ работа" / "m.md").read_text()
+    assert "[[Заг]]" in moc and "[[Заг (2)]]" in moc

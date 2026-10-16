@@ -16,3 +16,24 @@ def test_score_monotonic_and_capped():
 
 def test_keywords_add_points():
     assert score("", "", "claude mcp", ["claude", "mcp"]) > score("", "", "ничего", ["claude", "mcp"])
+
+
+def test_whisper_failure_raises(tmp_path, monkeypatch):
+    import subprocess
+    from reels_radar import local
+    monkeypatch.setattr(local.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 1, "", "boom"))
+    import pytest
+    with pytest.raises(RuntimeError):
+        local.transcribe("w", "m", tmp_path / "v.mp4", tmp_path / "stt")
+
+
+def test_no_speech_is_empty_not_error(tmp_path, monkeypatch):
+    import subprocess
+    from reels_radar import local
+    def fake(*a, **k):
+        (tmp_path / "stt").mkdir(exist_ok=True)
+        (tmp_path / "stt" / "v.txt").write_text("")
+        return subprocess.CompletedProcess(a, 0, "", "")
+    monkeypatch.setattr(local.subprocess, "run", fake)
+    assert local.transcribe("w", "m", tmp_path / "v.mp4", tmp_path / "stt") == ""
