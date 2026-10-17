@@ -24,9 +24,35 @@ def main(argv=None) -> int:
     p = sub.add_parser("run"); p.add_argument("--limit", type=int)
     p = sub.add_parser("digest"); p.add_argument("--days", type=int, default=7)
     sub.add_parser("bot")
+    sp = sub.add_parser("sources"); ssub = sp.add_subparsers(dest="scmd", required=True)
+    pi = ssub.add_parser("import"); pi.add_argument("--export", required=True)
+    for n in ("flag", "export", "stats"):
+        ssub.add_parser(n)
+    pv = ssub.add_parser("verify"); pv.add_argument("--limit", type=int, default=20)
     a = ap.parse_args(argv)
     r = root()
     s, themes = load_settings(r), load_themes(r)
+    if a.cmd == "sources":
+        from datetime import datetime as _dt
+        from .sources.cleanup import export_cleanup, flag_for_verification
+        from .sources.db import SourcesDB
+        from .sources.importers import import_following, import_last_posts, import_saved_authors
+        sdb = SourcesDB(s.data_dir / "sources.db")
+        if a.scmd == "import":
+            fol = next(Path(a.export).rglob("following.json"), None)
+            print("подписок новых:", import_following(sdb, fol) if fol else 0)
+            print("авторов сохранёнок новых:", import_saved_authors(
+                sdb, s.reels_pipeline / "items_by_key.json", s.reels_pipeline / "final_theme_map.json", a.export))
+            print("дат постов обновлено:", import_last_posts(sdb, s.last_posts_file) if s.last_posts_file.is_file() else 0)
+        elif a.scmd == "flag":
+            print("отложено на проверку:", flag_for_verification(sdb, _dt.now(), s.cleanup_years))
+        elif a.scmd == "verify":
+            print("читатель профиля Instagram пока не подключён (спайк S1), проверка не запущена")
+        elif a.scmd == "export":
+            print("в списке на удаление:", export_cleanup(sdb, s.data_dir / "cleanup.txt"))
+        else:
+            print(sdb.counts())
+        return 0
     db = DB(s.data_dir / "radar.db")
     if a.cmd == "ingest":
         n = ingest(parse_export(Path(a.export_dir)), known_codes(s.reels_pipeline, s.reels_tools, db), db)

@@ -10,3 +10,5 @@ batch_size: 20
 min_free_gb: 3
 claude_timeout: 300
 keywords: [claude, клод, mcp, скилл, промпт, монтаж, съёмка, хук, нячанг, йога, продуктивность]
+last_posts_file: /Users/cucaramba/Claude Code/tmp/ig_last_post_dates.jsonl
+cleanup_years: 2
