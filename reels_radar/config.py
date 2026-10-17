@@ -33,6 +33,8 @@ class Settings:
     min_free_gb: float
     claude_timeout: int
     keywords: list[str]
+    last_posts_file: Path
+    cleanup_years: int
 
 
 def load_settings(root: Path) -> Settings:
@@ -55,6 +57,8 @@ def load_settings(root: Path) -> Settings:
         min_free_gb=float(y["min_free_gb"]),
         claude_timeout=int(y["claude_timeout"]),
         keywords=[k.lower() for k in y["keywords"]],
+        last_posts_file=Path(y.get("last_posts_file", "")),
+        cleanup_years=int(y.get("cleanup_years", 2)),
     )
 
 
