@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .vault import add_moc_line, write_note
+from .vault import add_moc_line, add_to_canvas, write_note
 
 WRITES = {"note", "product", "claude"}
 
@@ -35,10 +35,10 @@ def apply_action(db, code, action, themes, vault: Path) -> str:
             return "сохранено в базе"
         theme = themes[r["theme"]]
         if not theme.folder:
-            db.update(code, status="approved")
-            return "тема без папки, сохранено в базе"
+            return "у темы нет папки в vault, выбери тему кнопкой 🏷"
         path, created = write_note(vault, theme, r["title"], r["body"], code)
         line = add_moc_line(vault, theme, path.stem)
+        add_to_canvas(vault, theme, str(path.relative_to(vault)))
         db.update(code, status="written", note_path=str(path.relative_to(vault)),
                   note_created=int(created), moc_line=line)
         return f"записано: {path.name}"

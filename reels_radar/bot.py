@@ -37,7 +37,7 @@ def router(s, db, themes) -> Router:
     async def cb(q: CallbackQuery):
         action, code = parse_callback(q.data)
         if action == "theme":
-            rows = [[InlineKeyboardButton(text=n, callback_data=theme_cb(i, code))] for i, n in enumerate(themes)]
+            rows = [[InlineKeyboardButton(text=n, callback_data=theme_cb(i, code))] for i, n in enumerate(themes) if themes[n].folder]
             await q.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
         elif action == "st":
             idx, code = code.split("|", 1)

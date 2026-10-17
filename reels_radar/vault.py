@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
 import shutil
+import uuid
 from pathlib import Path
 
 from .config import Theme
@@ -21,7 +23,9 @@ def write_note(vault: Path, theme: Theme, title: str, body: str, code: str) -> t
         path = folder / f"{base} ({n}).md"
         n += 1
     assert path.resolve().is_relative_to(folder.resolve())
-    path.write_text(body.rstrip() + "\n", encoding="utf8")
+    moc = (theme.moc or "")[:-3] if (theme.moc or "").endswith(".md") else (theme.moc or "")
+    text = f"# {title.strip()}\n\n{body.strip()}\n\n## Связанные заметки\n- [[{moc}]]\n"
+    path.write_text(text, encoding="utf8")
     return path, True
 
 
@@ -51,3 +55,26 @@ def rollback(vault: Path, db, code: str, themes: dict[str, Theme]) -> str:
             moc.write_text(moc.read_text(encoding="utf8").replace(r["moc_line"] + "\n", ""), encoding="utf8")
     db.update(code, status="draft", note_path=None, note_created=None, moc_line=None)
     return "заметка перенесена в .trash"
+
+
+def add_to_canvas(vault: Path, theme: Theme, note_rel: str) -> bool:
+    """Файловая нода заметки на холст раздела + стрелка от MOC. Нет холста: ничего не делаем."""
+    cv = Path(vault) / f"{theme.folder}.canvas"
+    if not cv.exists():
+        return False
+    data = json.loads(cv.read_text(encoding="utf8"))
+    nodes = data.setdefault("nodes", [])
+    if any(n.get("file") == note_rel for n in nodes):
+        return True
+    x = min((n.get("x", 0) for n in nodes), default=0)
+    y = max((n.get("y", 0) + n.get("height", 0) for n in nodes), default=0) + 40
+    node = {"id": uuid.uuid4().hex[:16], "type": "file", "file": note_rel, "x": x, "y": y,
+            "width": 400, "height": 200}
+    nodes.append(node)
+    moc = next((n for n in nodes if str(n.get("file", "")).endswith(theme.moc or "\0")), None)
+    if moc:
+        data.setdefault("edges", []).append(
+            {"id": uuid.uuid4().hex[:16], "fromNode": moc["id"], "fromSide": "bottom",
+             "toNode": node["id"], "toSide": "top"})
+    cv.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf8")
+    return True
