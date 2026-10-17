@@ -15,6 +15,9 @@ def import_following(sdb: SourcesDB, path) -> int:
         u = norm(x.get("title") if isinstance(x, dict) else "")
         if not u:
             continue
+        row = sdb.get(u)
+        if row is not None and row["status"] == "ignored":
+            continue  # уже отписан через /done: повторный импорт старого экспорта не возвращает подписку
         new += sdb.upsert(u, followed=1)
     return new
 

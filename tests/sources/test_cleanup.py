@@ -31,8 +31,8 @@ def test_decide_private_and_error_are_unknown():
     assert decide(Activity(error="RATE", channels=ALL), NOW, 2)[0] == "unknown"
 
 
-def test_decide_no_content_anywhere_all_checked_is_inactive():
-    assert decide(Activity(channels=ALL), NOW, 2)[0] == "inactive"
+def test_decide_no_content_anywhere_needs_proof():
+    assert decide(Activity(channels=ALL, posts_count=0), NOW, 2)[0] == "inactive"
 
 
 def test_legacy_data_flags_but_never_suggests(sdb):
@@ -90,3 +90,28 @@ def test_candidates_order_and_marked(sdb):
     assert [r["username"] for r in candidates(sdb, 1, offset=1)] == ["b"]
     sdb.update("a", intent="cleanup")
     assert [r["username"] for r in marked(sdb)] == ["a"]
+
+
+def test_empty_snapshot_without_proof_is_unknown_not_inactive():
+    assert decide(Activity(channels=ALL), NOW, 2)[0] == "unknown"
+    assert decide(Activity(channels=ALL, posts_count=0), NOW, 2)[0] == "inactive"
+
+
+def test_unparseable_date_is_unknown():
+    assert decide(Activity(last_post="01.03.2026", channels=ALL), NOW, 2)[0] == "unknown"
+    assert decide(Activity(last_post="2026-03-01", channels=ALL), NOW, 2)[0] == "active"
+
+
+def test_candidates_never_include_saved_personal_or_unfollowed(sdb):
+    for u in ("saved", "friend", "gone", "ok"):
+        acc(sdb, u, last_post_at=OLD, posts_visible=1, suggest_cleanup=1)
+    sdb.update("saved", saved_count=3); sdb.update("friend", status="personal"); sdb.update("gone", followed=0)
+    assert [r["username"] for r in candidates(sdb, 10)] == ["ok"]
+
+
+def test_record_activity_does_not_suggest_protected(sdb):
+    acc(sdb, "friend", last_post_at=OLD, posts_visible=1, status="personal")
+    acc(sdb, "saved", last_post_at=OLD, posts_visible=1, saved_count=2)
+    for u in ("friend", "saved"):
+        record_activity(sdb, u, Activity(last_post=OLD, channels=ALL), NOW)
+        assert sdb.get(u)["suggest_cleanup"] == 0

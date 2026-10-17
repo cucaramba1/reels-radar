@@ -8,7 +8,8 @@ from .db import SourcesDB
 
 
 def flag_for_verification(sdb: SourcesDB, now: datetime, years: int = 2) -> int:
-    cutoff = now.replace(year=now.year - years).strftime("%Y-%m-%d")
+    from .activity import _cutoff
+    cutoff = _cutoff(now, years)
     rows = sdb.c.execute(
         "SELECT username, last_post_at, posts_visible FROM accounts "
         "WHERE followed=1 AND status!='personal' AND saved_count=0 AND reviewed=0 "
@@ -28,12 +29,15 @@ def flag_for_verification(sdb: SourcesDB, now: datetime, years: int = 2) -> int:
 
 def record_activity(sdb: SourcesDB, username: str, a: Activity, now: datetime, years: int = 2) -> str:
     verdict, why = decide(a, now, years)
+    row = sdb.get(username)
+    protected = row is not None and (row["status"] in ("personal", "ignored") or row["saved_count"] > 0 or not row["followed"])
     fields = dict(last_post_at=a.last_post, last_reel_at=a.last_reel, last_collab_at=a.last_collab,
                   story_active=int(a.story_active), is_private=int(a.private), last_checked=now.isoformat())
     if verdict == "active":
         fields.update(verified=1, needs_verify=0, suggest_cleanup=0, why=why)
     elif verdict == "inactive":
-        fields.update(verified=1, needs_verify=0, suggest_cleanup=1, why=why)
+        fields.update(verified=1, needs_verify=0, suggest_cleanup=0 if protected else 1,
+                      why=why + (" (защищён: личный, с сохранёнками или уже отписан)" if protected else ""))
     else:
         fields.update(verified=0, suggest_cleanup=0, verify_note=why, needs_verify=0 if a.private else 1)
     sdb.update(username, **fields)
@@ -42,7 +46,8 @@ def record_activity(sdb: SourcesDB, username: str, a: Activity, now: datetime, y
 
 def candidates(sdb: SourcesDB, limit: int = 10, offset: int = 0):
     return sdb.c.execute(
-        "SELECT * FROM accounts WHERE suggest_cleanup=1 AND reviewed=0 "
+        "SELECT * FROM accounts WHERE suggest_cleanup=1 AND reviewed=0 AND followed=1 AND saved_count=0 "
+        "AND status NOT IN ('personal', 'ignored') "
         "ORDER BY (last_post_at IS NULL), last_post_at ASC, username LIMIT ? OFFSET ?",
         (limit, offset)).fetchall()
 

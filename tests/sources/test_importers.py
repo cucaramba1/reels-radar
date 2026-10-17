@@ -45,3 +45,12 @@ def test_import_last_posts(tmp_path, sdb):
     assert import_last_posts(sdb, j) == 2
     assert sdb.get("bob")["last_post_at"].startswith("2019-03-01") and sdb.get("bob")["posts_visible"] == 1
     assert sdb.get("empty")["posts_visible"] == 0 and sdb.get("empty")["last_post_at"] is None
+
+
+def test_reimport_does_not_resurrect_unfollowed(tmp_path, sdb):
+    f = tmp_path / "following.json"
+    write(f, {"relationships_following": [{"title": "bob"}]})
+    import_following(sdb, f)
+    sdb.update("bob", status="ignored", followed=0)
+    import_following(sdb, f)
+    assert sdb.get("bob")["followed"] == 0 and sdb.get("bob")["status"] == "ignored"

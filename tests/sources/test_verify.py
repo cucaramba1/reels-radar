@@ -41,3 +41,35 @@ def test_verify_batch_respects_limit_and_skips_personal(sdb):
         seen.append(u); return Activity(last_post=OLD, channels=ALL)
     verify_batch(sdb, reader, NOW, limit=1, sleep=lambda s: None)
     assert len(seen) == 1 and "a" not in seen
+
+
+def test_verify_skips_accounts_that_became_saved(sdb):
+    seed(sdb, "a", "b")
+    sdb.update("a", saved_count=2)
+    seen = []
+    def reader(u):
+        seen.append(u); return Activity(last_post=OLD, channels=ALL)
+    verify_batch(sdb, reader, NOW, limit=10, sleep=lambda s: None)
+    assert seen == ["b"]
+
+
+def test_any_unknown_error_stops_batch_but_not_found_continues(sdb):
+    seed(sdb, "a", "b", "c")
+    calls = []
+    def reader(u):
+        calls.append(u)
+        return {"a": Activity(error="NOT_FOUND"), "b": Activity(error="429 too many")}.get(u, Activity(last_post=OLD, channels=ALL))
+    res = verify_batch(sdb, reader, NOW, limit=10, sleep=lambda s: None)
+    assert calls == ["a", "b"] and res["stopped"] == "429 too many"
+
+
+def test_chronically_failing_accounts_go_last(sdb):
+    seed(sdb, "bad", "good")
+    for _ in range(3):
+        sdb.log_check("bad", "NOT_FOUND")
+    sdb.update("bad", last_post_at="2010-01-01T00:00:00.000Z")
+    seen = []
+    def reader(u):
+        seen.append(u); return Activity(last_post=OLD, channels=ALL)
+    verify_batch(sdb, reader, NOW, limit=1, sleep=lambda s: None)
+    assert seen == ["good"]
