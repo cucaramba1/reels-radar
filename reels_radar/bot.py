@@ -8,6 +8,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from .cards import keyboard_spec, parse_callback, render_card, theme_cb
 from .review import apply_action
+from .sources.cards import account_keyboard, account_text, chunk_lines, parse_account_cb
+from .sources.cleanup import apply_action as acc_action, candidates, export_cleanup, marked
+from .sources.db import SourcesDB
 from .vault import rollback
 
 
@@ -29,9 +32,40 @@ async def send_pending(bot: Bot, db, owner_id: int, limit: int = 10) -> int:
     return n
 
 
-def router(s, db, themes) -> Router:
+def router(s, db, themes, sdb=None) -> Router:
     rt = Router()
     owner = F.from_user.id == s.owner_id
+
+    def akb(u):
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t, callback_data=d) for t, d in row]
+                                                     for row in account_keyboard(u)])
+
+    @rt.callback_query(F.data.startswith("ac:"), owner)
+    async def acb(q: CallbackQuery):
+        action, user = parse_account_cb(q.data)
+        msg = acc_action(sdb, user, action)
+        await q.message.edit_reply_markup(reply_markup=None)
+        await q.answer(msg)
+
+    @rt.message(Command("cleanup"), owner)
+    async def cleanup(m: Message):
+        rows = candidates(sdb, 10)
+        if not rows:
+            await m.answer("кандидатов на чистку нет")
+        for r in rows:
+            await m.answer(account_text(r), reply_markup=akb(r["username"]))
+
+    @rt.message(Command("cleanup_list"), owner)
+    async def clist(m: Message):
+        export_cleanup(sdb, s.data_dir / "cleanup.txt")
+        lines = [f"{r['username']} - {r['why'] or ''}".strip(" -") for r in marked(sdb)]
+        for part in chunk_lines(lines) or ["список пуст"]:
+            await m.answer(part)
+
+    @rt.message(Command("done"), owner)
+    async def done(m: Message):
+        users = (m.text or "").split()[1:]
+        await m.answer(", ".join(f"{u}: {acc_action(sdb, u, 'done')}" for u in users) or "укажи юзернеймы")
 
     @rt.callback_query(owner)
     async def cb(q: CallbackQuery):
@@ -70,7 +104,7 @@ def router(s, db, themes) -> Router:
 async def run_bot(s, db, themes):
     bot = Bot(s.bot_token)
     dp = Dispatcher()
-    dp.include_router(router(s, db, themes))
+    dp.include_router(router(s, db, themes, SourcesDB(s.data_dir / "sources.db")))
 
     async def pump():
         while True:
