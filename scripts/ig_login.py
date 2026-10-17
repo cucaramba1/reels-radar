@@ -12,6 +12,8 @@ with sync_playwright() as p:
     ctx = p.chromium.launch_persistent_context(str(PROFILE), headless=False, viewport={"width": 1100, "height": 900})
     page = ctx.pages[0] if ctx.pages else ctx.new_page()
     page.goto("https://www.instagram.com/accounts/login/", wait_until="domcontentloaded")
+    page.bring_to_front()
+    subprocess.run(["osascript", "-e", 'tell application "Chromium" to activate'], capture_output=True)
     print("ждём вход...", flush=True)
     ok = False
     while time.time() < deadline:
