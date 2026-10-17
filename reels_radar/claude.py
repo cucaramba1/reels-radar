@@ -1,0 +1,60 @@
+"""claude -p раннер (скопирован из tg-harvester/harvester/brain.py, логика без изменений)."""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+
+from .config import Settings
+
+
+class BrainError(RuntimeError):
+    pass
+
+
+async def run_claude(s: Settings, prompt: str, *, system: str, schema: dict | None = None,
+                     tools: tuple[str, ...] = (), add_dirs: tuple[str, ...] = (), timeout: int) -> dict | str:
+    args = [s.claude_bin, "-p", "--output-format", "json", "--no-session-persistence",
+            "--system-prompt", system, "--tools", ",".join(tools)]
+    if tools:
+        args += ["--allowedTools", ",".join(tools)]  # без этого в -p тул упрётся в запрос разрешения
+    args += ["--model", os.environ.get("CLAUDE_BATCH_MODEL", "sonnet")]  # ночные батчи не на Opus
+    for d in add_dirs:
+        args += ["--add-dir", d]
+    if schema is not None:
+        args += ["--json-schema", json.dumps(schema, ensure_ascii=False)]
+    s.data_dir.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "PATH": f"{os.path.dirname(s.claude_bin)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            cwd=str(s.data_dir), env=env)
+    except OSError as e:
+        raise BrainError(f"не смог запустить claude: {e}")
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise BrainError(f"claude не ответил за {timeout} с")
+    if proc.returncode != 0:
+        raise BrainError(f"claude exit {proc.returncode}: {(err or out).decode(errors='ignore')[-300:]}")
+    try:
+        data = json.loads(out)
+    except ValueError:
+        raise BrainError("claude вернул не JSON")
+    if data.get("is_error"):
+        raise BrainError(f"claude: {str(data.get('result'))[:300]}")
+    if schema is not None:
+        so = data.get("structured_output")
+        if not isinstance(so, dict):
+            raise BrainError("claude не вернул structured_output")
+        return so
+    return str(data.get("result") or "")
+
+
+
+def is_limit(e: Exception) -> bool:
+    """Лимит подписки или claude вообще не запускается: ночь обрывается, посты ждут без штрафа."""
+    t = str(e).lower()
+    return any(w in t for w in ("limit", "лимит", "usage", "не смог запустить"))
