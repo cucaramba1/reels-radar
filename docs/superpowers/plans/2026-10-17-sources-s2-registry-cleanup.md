@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Отдельная БД аккаунтов `data/sources.db`: импорт подписок, авторов сохранёнок и дат последних постов, предложения на чистку, бот-ревью `/cleanup` и список на ручную отписку.
+**Goal:** Отдельная БД аккаунтов `data/sources.db`: импорт подписок, авторов сохранёнок и старых дат, **определение активности по всем каналам выкладки (посты, рилсы, коллабы, истории)**, очередь проверки, бот-ревью `/cleanup` и список на ручную отписку.
 
-**Architecture:** Новый модуль `reels_radar/sources/` с `SourcesDB` (stdlib sqlite3), чистыми функциями импорта, правил чистки и действий над аккаунтом; бот получает 3 команды и callback `ac:`. Запросов к Instagram нет совсем: всё из файлов на диске.
+**Architecture:** Новый модуль `reels_radar/sources/` с `SourcesDB` (stdlib sqlite3), чистыми функциями импорта, правил чистки и действий над аккаунтом; бот получает 3 команды и callback `ac:`. Проверка активности идёт через подменяемый `reader(username) -> Activity`: в этом плане он тестируется подставными данными, настоящий читатель профиля (Playwright) пишется после спайка S1.
 
 **Tech Stack:** Python 3.12, sqlite3, aiogram (уже в проекте), pytest.
 
@@ -15,6 +15,7 @@
 - Бот и код **ничего не отписывают и не нажимают** в Instagram: только чтение файлов и запись в `sources.db` (решение Некита, спека «Чистка»).
 - Аккаунт со статусом `personal` никогда не попадает в предложения на чистку.
 - Аккаунт, у которого есть сохранёнки (`saved_count > 0`), не предлагается на чистку.
+- **Вывод «неактивен» только по всем четырём каналам** (posts, reels, collab, stories): достаточно одного свежего сигнала, чтобы аккаунт считался активным. Закрытый профиль, ошибка или неполная проверка не дают предложения на чистку. Старые даты (`ig_last_post_dates.jsonl`, один канал) только ставят `needs_verify`.
 - Юзернеймы нормализуются в нижний регистр без `@`.
 - Без длинного тире (—) в текстах бота и файле списка.
 - Callback data ≤ 64 байта: `ac:<action>:<username>`, юзернейм Instagram не длиннее 30 символов.
@@ -25,6 +26,8 @@
 
 - Запись в списках с пустым или `null` юзернеймом, дубли с разным регистром: не падает, одна запись (Task 2).
 - Повторный импорт: счётчики и ручные пометки Некита (`reviewed`, `intent`, `status`) не затираются (Task 2).
+- Аккаунт, активный только через рилсы, только через коллабы или только через истории: не предлагается на чистку (Task 3).
+- Закрытый профиль, ошибка чтения, неполный набор каналов: не предлагается, помечен «не удалось проверить» (Task 3).
 - Аккаунт без видимых постов, но с сохранёнками или помеченный `personal`: не предлагается (Task 3).
 - Двойной клик на 🗑 или смена решения: итоговое состояние одно и предсказуемо (Task 4).
 - Юзернейм с точкой, подчёркиванием, цифрами в callback data разбирается правильно (Task 4).
@@ -37,7 +40,9 @@
 reels_radar/sources/__init__.py
 reels_radar/sources/db.py        SourcesDB
 reels_radar/sources/importers.py import_following, import_saved_authors, import_last_posts
-reels_radar/sources/cleanup.py   suggest_cleanup, candidates, apply_action, export_cleanup
+reels_radar/sources/activity.py  Activity, activity_last, decide
+reels_radar/sources/cleanup.py   flag_for_verification, record_activity, candidates, apply_action, export_cleanup
+reels_radar/sources/verify.py    verify_batch (читатель профиля подменяемый)
 reels_radar/sources/cards.py     account_text, account_keyboard, parse_account_cb
 reels_radar/bot.py               +/cleanup, /cleanup_list, /done, callback ac:
 reels_radar/cli.py               +sources import|suggest|export
@@ -52,7 +57,7 @@ tests/sources/test_*.py
 **Files:** Create `reels_radar/sources/__init__.py`, `reels_radar/sources/db.py`; Test `tests/sources/__init__.py`, `tests/sources/conftest.py`, `tests/sources/test_db.py`
 
 **Interfaces:**
-- Produces: `SourcesDB(path)` with `upsert(username, **fields) -> bool` (True если создан), `get(username) -> Row | None`, `update(username, **fields)`, `by_status(status, limit=1000) -> list[Row]`, `counts() -> dict[str,int]`, `add_edge(parent, child, kind)`, `log_check(username, result)`. Поля: `status, intent, themes, priority, value_score, posts_per_week, last_post_at, posts_visible, followers, bio, why, suggest_cleanup, reviewed, followed, saved_count, depth, notes, first_seen, last_checked, next_check`. `norm(username) -> str`.
+- Produces: `SourcesDB(path)` with `upsert(username, **fields) -> bool` (True если создан), `get(username) -> Row | None`, `update(username, **fields)`, `by_status(status, limit=1000) -> list[Row]`, `counts() -> dict[str,int]`, `add_edge(parent, child, kind)`, `log_check(username, result)`. Поля: `status, intent, themes, priority, value_score, posts_per_week, last_post_at, last_reel_at, last_collab_at, story_active, is_private, verified, needs_verify, verify_note, posts_visible, followers, bio, why, suggest_cleanup, reviewed, followed, saved_count, depth, notes, first_seen, last_checked, next_check`. `norm(username) -> str`.
 
 - [ ] **Step 1: Failing test** `tests/sources/test_db.py`:
 ```python
@@ -114,7 +119,9 @@ CREATE TABLE IF NOT EXISTS accounts (
   username TEXT PRIMARY KEY, platform TEXT NOT NULL DEFAULT 'instagram',
   status TEXT NOT NULL DEFAULT 'candidate', intent TEXT NOT NULL DEFAULT 'none',
   themes TEXT, priority REAL NOT NULL DEFAULT 0, value_score REAL, posts_per_week REAL,
-  last_post_at TEXT, posts_visible INTEGER, followers INTEGER, bio TEXT, why TEXT,
+  last_post_at TEXT, last_reel_at TEXT, last_collab_at TEXT, story_active INTEGER, is_private INTEGER,
+  verified INTEGER NOT NULL DEFAULT 0, needs_verify INTEGER NOT NULL DEFAULT 0, verify_note TEXT,
+  posts_visible INTEGER, followers INTEGER, bio TEXT, why TEXT,
   suggest_cleanup INTEGER NOT NULL DEFAULT 0, reviewed INTEGER NOT NULL DEFAULT 0,
   followed INTEGER NOT NULL DEFAULT 0, saved_count INTEGER NOT NULL DEFAULT 0,
   depth INTEGER NOT NULL DEFAULT 0, notes TEXT,
@@ -128,6 +135,7 @@ CREATE TABLE IF NOT EXISTS checks (id INTEGER PRIMARY KEY AUTOINCREMENT, usernam
 """
 
 FIELDS = {"status", "intent", "themes", "priority", "value_score", "posts_per_week", "last_post_at",
+          "last_reel_at", "last_collab_at", "story_active", "is_private", "verified", "needs_verify", "verify_note",
           "posts_visible", "followers", "bio", "why", "suggest_cleanup", "reviewed", "followed",
           "saved_count", "depth", "notes", "first_seen", "last_checked", "next_check"}
 
@@ -320,88 +328,194 @@ def import_last_posts(sdb: SourcesDB, jsonl_path) -> int:
 
 ---
 
-### Task 3: Правила чистки
+### Task 3: Определение активности и очередь проверки
 
-**Files:** Create `reels_radar/sources/cleanup.py`; Test `tests/sources/test_cleanup.py`
+**Files:** Create `reels_radar/sources/activity.py`, `reels_radar/sources/cleanup.py`; Test `tests/sources/test_cleanup.py`
 
 **Interfaces:**
-- Consumes: `SourcesDB`.
-- Produces: `suggest_cleanup(sdb, now: datetime, years: int = 2) -> int` (число новых предложений), `candidates(sdb, limit=10, offset=0) -> list[Row]` (suggest_cleanup=1 и reviewed=0; сначала самые давние с датой, затем без постов), `marked(sdb) -> list[Row]` (intent=cleanup, followed=1, status != ignored).
+- Produces (`activity.py`): `CHANNELS = ("posts", "reels", "collab", "stories")`; `Activity` dataclass `(last_post: str|None = None, last_reel: str|None = None, last_collab: str|None = None, story_active: bool = False, private: bool = False, channels: frozenset[str] = frozenset(), error: str|None = None)`; `activity_last(a: Activity) -> str|None` (максимум из трёх дат ISO); `decide(a: Activity, now: datetime, years: int) -> tuple[str, str]` возвращает `(verdict, why)`, `verdict ∈ "active" | "inactive" | "unknown"`.
+- Produces (`cleanup.py`): `flag_for_verification(sdb, now, years=2) -> int` (старые данные: followed, не personal, `saved_count=0`, `reviewed=0`, `verified=0`, `needs_verify=0`, дата старше порога или `posts_visible=0` → `needs_verify=1`, `why="по старым данным: ..."`, `suggest_cleanup` НЕ ставится); `record_activity(sdb, username, a: Activity, now, years=2) -> str` (записывает даты и признаки, применяет `decide`: `active` → `needs_verify=0, suggest_cleanup=0, verified=1`; `inactive` → `verified=1, needs_verify=0, suggest_cleanup=1, why`; `unknown` → `verified=0`, `needs_verify=0 если private иначе 1`, `suggest_cleanup=0`, `verify_note` с причиной; возвращает verdict); `candidates(sdb, limit=10, offset=0)` (suggest_cleanup=1 и reviewed=0, сначала самые давние); `marked(sdb)` (intent=cleanup, followed=1, status != ignored).
+- Правило `decide`: `error` → unknown; `private` → unknown; если любая дата ≥ cutoff или `story_active` → active (даже при неполных каналах); иначе если `channels` содержит все `CHANNELS` → inactive; иначе unknown. cutoff = `now` минус `years` лет.
 
 - [ ] **Step 1: Failing test** `tests/sources/test_cleanup.py`:
 ```python
 from datetime import datetime
-from reels_radar.sources.cleanup import suggest_cleanup, candidates, marked
+from reels_radar.sources.activity import Activity, CHANNELS, decide
+from reels_radar.sources.cleanup import flag_for_verification, record_activity, candidates, marked
 
 NOW = datetime(2026, 10, 17)
+ALL = frozenset(CHANNELS)
+OLD = "2019-03-01T00:00:00.000Z"
+NEW = "2026-09-01T00:00:00.000Z"
 
 
-def acc(sdb, u, last=None, visible=1, **kw):
-    sdb.upsert(u, followed=1, last_post_at=last, posts_visible=visible, **kw)
+def acc(sdb, u, **kw):
+    sdb.upsert(u, followed=1, **kw)
 
 
-def test_old_and_empty_are_suggested(sdb):
-    acc(sdb, "old", "2019-03-01T00:00:00.000Z")
-    acc(sdb, "fresh", "2026-09-01T00:00:00.000Z")
-    acc(sdb, "empty", None, visible=0)
-    assert suggest_cleanup(sdb, NOW) == 2
-    assert sdb.get("old")["suggest_cleanup"] == 1 and "2019-03-01" in sdb.get("old")["why"]
-    assert sdb.get("fresh")["suggest_cleanup"] == 0
-    assert "нет видимых постов" in sdb.get("empty")["why"]
+def test_decide_active_by_any_single_channel():
+    assert decide(Activity(last_post=OLD, last_reel=NEW, channels=ALL), NOW, 2)[0] == "active"
+    assert decide(Activity(last_post=OLD, last_collab=NEW, channels=ALL), NOW, 2)[0] == "active"
+    assert decide(Activity(last_post=OLD, story_active=True, channels=ALL), NOW, 2)[0] == "active"
+    assert decide(Activity(last_reel=NEW, channels=frozenset({"reels"})), NOW, 2)[0] == "active"
 
 
-def test_protected_accounts_never_suggested(sdb):
-    acc(sdb, "saved", "2019-01-01T00:00:00.000Z", saved_count=2)
-    acc(sdb, "friend", "2019-01-01T00:00:00.000Z", status="personal")
-    acc(sdb, "keeper", "2019-01-01T00:00:00.000Z", reviewed=1)
-    acc(sdb, "unknown_date", None, visible=None)
-    assert suggest_cleanup(sdb, NOW) == 0
+def test_decide_inactive_only_when_all_channels_checked_and_old():
+    a = Activity(last_post=OLD, last_reel=OLD, last_collab=None, story_active=False, channels=ALL)
+    assert decide(a, NOW, 2)[0] == "inactive"
+    partial = Activity(last_post=OLD, channels=frozenset({"posts"}))
+    assert decide(partial, NOW, 2)[0] == "unknown"
 
 
-def test_not_followed_never_suggested(sdb):
-    sdb.upsert("x", followed=0, last_post_at="2018-01-01T00:00:00.000Z", posts_visible=1)
-    assert suggest_cleanup(sdb, NOW) == 0
+def test_decide_private_and_error_are_unknown():
+    assert decide(Activity(private=True, channels=ALL), NOW, 2)[0] == "unknown"
+    assert decide(Activity(error="RATE", channels=ALL), NOW, 2)[0] == "unknown"
 
 
-def test_candidates_order_and_paging(sdb):
-    acc(sdb, "b", "2020-01-01T00:00:00.000Z"); acc(sdb, "a", "2018-01-01T00:00:00.000Z")
-    acc(sdb, "z", None, visible=0)
-    suggest_cleanup(sdb, NOW)
-    assert [r["username"] for r in candidates(sdb, 10)] == ["a", "b", "z"]
+def test_decide_no_content_anywhere_all_checked_is_inactive():
+    assert decide(Activity(channels=ALL), NOW, 2)[0] == "inactive"
+
+
+def test_legacy_data_flags_but_never_suggests(sdb):
+    acc(sdb, "old", last_post_at=OLD, posts_visible=1)
+    acc(sdb, "empty", posts_visible=0)
+    acc(sdb, "fresh", last_post_at=NEW, posts_visible=1)
+    assert flag_for_verification(sdb, NOW) == 2
+    assert sdb.get("old")["needs_verify"] == 1 and sdb.get("old")["suggest_cleanup"] == 0
+    assert sdb.get("fresh")["needs_verify"] == 0
+
+
+def test_protected_accounts_not_flagged(sdb):
+    acc(sdb, "saved", last_post_at=OLD, posts_visible=1, saved_count=2)
+    acc(sdb, "friend", last_post_at=OLD, posts_visible=1, status="personal")
+    acc(sdb, "keeper", last_post_at=OLD, posts_visible=1, reviewed=1)
+    sdb.upsert("x", followed=0, last_post_at=OLD, posts_visible=1)
+    assert flag_for_verification(sdb, NOW) == 0
+
+
+def test_reels_only_account_is_not_suggested(sdb):
+    acc(sdb, "reeler", last_post_at=OLD, posts_visible=1)
+    flag_for_verification(sdb, NOW)
+    verdict = record_activity(sdb, "reeler", Activity(last_post=OLD, last_reel=NEW, channels=ALL), NOW)
+    r = sdb.get("reeler")
+    assert verdict == "active" and r["suggest_cleanup"] == 0 and r["needs_verify"] == 0 and r["last_reel_at"] == NEW
+
+
+def test_stories_only_account_is_not_suggested(sdb):
+    acc(sdb, "storyteller", last_post_at=OLD, posts_visible=1)
+    assert record_activity(sdb, "storyteller", Activity(last_post=OLD, story_active=True, channels=ALL), NOW) == "active"
+    assert sdb.get("storyteller")["suggest_cleanup"] == 0
+
+
+def test_truly_dead_account_is_suggested_with_all_channels_in_why(sdb):
+    acc(sdb, "dead", last_post_at=OLD, posts_visible=1)
+    assert record_activity(sdb, "dead", Activity(last_post=OLD, last_reel=OLD, channels=ALL), NOW) == "inactive"
+    r = sdb.get("dead")
+    assert r["suggest_cleanup"] == 1 and r["verified"] == 1 and "2019-03-01" in r["why"] and "истори" in r["why"]
+
+
+def test_private_and_incomplete_are_unknown_not_suggested(sdb):
+    acc(sdb, "priv", posts_visible=0)
+    acc(sdb, "half", last_post_at=OLD, posts_visible=1)
+    assert record_activity(sdb, "priv", Activity(private=True, channels=ALL), NOW) == "unknown"
+    assert record_activity(sdb, "half", Activity(last_post=OLD, channels=frozenset({"posts"})), NOW) == "unknown"
+    assert sdb.get("priv")["suggest_cleanup"] == 0 and sdb.get("priv")["verify_note"]
+    assert sdb.get("half")["suggest_cleanup"] == 0 and sdb.get("half")["needs_verify"] == 1
+
+
+def test_candidates_order_and_marked(sdb):
+    for u, d in (("b", "2020-01-01T00:00:00.000Z"), ("a", "2018-01-01T00:00:00.000Z")):
+        acc(sdb, u, last_post_at=d, posts_visible=1)
+        record_activity(sdb, u, Activity(last_post=d, channels=ALL), NOW)
+    assert [r["username"] for r in candidates(sdb, 10)] == ["a", "b"]
     assert [r["username"] for r in candidates(sdb, 1, offset=1)] == ["b"]
-
-
-def test_marked(sdb):
-    acc(sdb, "a"); acc(sdb, "b")
     sdb.update("a", intent="cleanup")
     assert [r["username"] for r in marked(sdb)] == ["a"]
 ```
 - [ ] **Step 2: Run** → Expected: ImportError.
-- [ ] **Step 3: Implement:**
+- [ ] **Step 3: Implement** `reels_radar/sources/activity.py`:
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+
+CHANNELS = ("posts", "reels", "collab", "stories")
+
+
+@dataclass
+class Activity:
+    last_post: str | None = None
+    last_reel: str | None = None
+    last_collab: str | None = None
+    story_active: bool = False
+    private: bool = False
+    channels: frozenset = frozenset()
+    error: str | None = None
+
+
+def activity_last(a: Activity) -> str | None:
+    dates = [d for d in (a.last_post, a.last_reel, a.last_collab) if d]
+    return max(dates) if dates else None
+
+
+def decide(a: Activity, now: datetime, years: int) -> tuple[str, str]:
+    if a.error:
+        return "unknown", f"ошибка чтения: {a.error}"
+    if a.private:
+        return "unknown", "закрытый профиль, активность не проверить"
+    cutoff = now.replace(year=now.year - years).strftime("%Y-%m-%d")
+    last = activity_last(a)
+    if a.story_active or (last and last[:10] >= cutoff):
+        return "active", f"активен: последний сигнал {last[:10] if last else 'истории'}"
+    if set(CHANNELS) <= set(a.channels):
+        why = (f"нет активности с {cutoff}: пост {(a.last_post or 'нет')[:10]}, рилс {(a.last_reel or 'нет')[:10]}, "
+               f"коллаб {(a.last_collab or 'нет')[:10]}, историй нет")
+        return "inactive", why
+    return "unknown", "проверены не все каналы: " + ", ".join(sorted(a.channels)) if a.channels else "проверка не выполнена"
+```
+`reels_radar/sources/cleanup.py`:
 ```python
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
+from .activity import Activity, decide
 from .db import SourcesDB
 
 
-def suggest_cleanup(sdb: SourcesDB, now: datetime, years: int = 2) -> int:
+def flag_for_verification(sdb: SourcesDB, now: datetime, years: int = 2) -> int:
     cutoff = now.replace(year=now.year - years).strftime("%Y-%m-%d")
     rows = sdb.c.execute(
         "SELECT username, last_post_at, posts_visible FROM accounts "
-        "WHERE followed=1 AND status!='personal' AND saved_count=0 AND reviewed=0 AND suggest_cleanup=0").fetchall()
+        "WHERE followed=1 AND status!='personal' AND saved_count=0 AND reviewed=0 "
+        "AND verified=0 AND needs_verify=0 AND suggest_cleanup=0").fetchall()
     n = 0
     for r in rows:
         why = None
         if r["last_post_at"] and r["last_post_at"][:10] < cutoff:
-            why = f"последний пост {r['last_post_at'][:10]}"
+            why = f"по старым данным: последний пост {r['last_post_at'][:10]} (проверен один канал)"
         elif r["posts_visible"] == 0:
-            why = "нет видимых постов (закрытый или пустой)"
+            why = "по старым данным: нет видимых постов (проверен один канал)"
         if why:
-            sdb.update(r["username"], suggest_cleanup=1, why=why)
+            sdb.update(r["username"], needs_verify=1, why=why)
             n += 1
     return n
+
+
+def record_activity(sdb: SourcesDB, username: str, a: Activity, now: datetime, years: int = 2) -> str:
+    verdict, why = decide(a, now, years)
+    fields = dict(last_post_at=a.last_post, last_reel_at=a.last_reel, last_collab_at=a.last_collab,
+                  story_active=int(a.story_active), is_private=int(a.private), last_checked=now.isoformat())
+    if verdict == "active":
+        fields.update(verified=1, needs_verify=0, suggest_cleanup=0, why=why)
+    elif verdict == "inactive":
+        fields.update(verified=1, needs_verify=0, suggest_cleanup=1, why=why)
+    else:
+        fields.update(verified=0, suggest_cleanup=0, verify_note=why, needs_verify=0 if a.private else 1)
+    sdb.update(username, **fields)
+    return verdict
 
 
 def candidates(sdb: SourcesDB, limit: int = 10, offset: int = 0):
@@ -416,8 +530,9 @@ def marked(sdb: SourcesDB):
         "SELECT * FROM accounts WHERE intent='cleanup' AND followed=1 AND status!='ignored' "
         "ORDER BY (last_post_at IS NULL), last_post_at ASC, username").fetchall()
 ```
-- [ ] **Step 4: Run** → Expected: `5 passed`.
-- [ ] **Step 5: Commit** `feat(sources): cleanup rules`.
+Замечание: у `inactive` аккаунта с активностью только в `last_reel` порядок сортировки по `last_post_at` приблизителен, этого достаточно для списка.
+- [ ] **Step 4: Run** `uv run pytest tests/sources -q` → Expected: все зелёные.
+- [ ] **Step 5: Commit** `feat(sources): activity decision over all channels, verification queue`.
 
 ---
 
@@ -625,7 +740,7 @@ def chunk_lines(lines: list[str], limit: int = 3500) -> list[str]:
 **Files:** Modify `reels_radar/cli.py`, `config/settings.yaml`, `reels_radar/config.py`, `tests/test_config.py`; Test `tests/sources/test_cli_sources.py`
 
 **Interfaces:**
-- Produces: `settings.yaml`: `last_posts_file: /Users/cucaramba/Claude Code/tmp/ig_last_post_dates.jsonl`, `cleanup_years: 2`; `Settings.last_posts_file: Path`, `Settings.cleanup_years: int`. CLI: `sources import --export DIR` (following.json найден рекурсивно в DIR, `import_saved_authors`, `import_last_posts`), `sources suggest`, `sources export`, `sources stats`; все печатают числа.
+- Produces: `settings.yaml`: `last_posts_file: /Users/cucaramba/Claude Code/tmp/ig_last_post_dates.jsonl`, `cleanup_years: 2`; `Settings.last_posts_file: Path`, `Settings.cleanup_years: int`. CLI: `sources import --export DIR` (following.json найден рекурсивно в DIR, `import_saved_authors`, `import_last_posts`), `sources flag` (старые данные -> очередь проверки), `sources verify --limit N` (Task 8), `sources export`, `sources stats`; все печатают числа.
 
 - [ ] **Step 1: Failing test** `tests/sources/test_cli_sources.py`:
 ```python
@@ -636,7 +751,7 @@ from reels_radar.cli import main
 PROJECT = Path(__file__).resolve().parent.parent.parent
 
 
-def test_sources_import_suggest_export(tmp_path, monkeypatch, capsys):
+def test_sources_import_flag(tmp_path, monkeypatch, capsys):
     exp = tmp_path / "exp"; (exp / "connections").mkdir(parents=True)
     (exp / "connections" / "following.json").write_text(json.dumps({"relationships_following": [{"title": "old"}, {"title": "fresh"}]}))
     lp = tmp_path / "lp.jsonl"
@@ -650,12 +765,13 @@ def test_sources_import_suggest_export(tmp_path, monkeypatch, capsys):
     (tmp_path / "config" / "themes.yaml").write_text((PROJECT / "config" / "themes.yaml").read_text())
     monkeypatch.setenv("REELS_RADAR_ROOT", str(tmp_path))
     assert main(["sources", "import", "--export", str(exp)]) == 0
-    assert main(["sources", "suggest"]) == 0
+    assert main(["sources", "flag"]) == 0
     out = capsys.readouterr().out
-    assert "подписок новых: 2" in out and "предложено на чистку: 1" in out
+    assert "подписок новых: 2" in out and "отложено на проверку: 1" in out
     from reels_radar.sources.db import SourcesDB
     sdb = SourcesDB(tmp_path / "data" / "sources.db")
-    assert sdb.get("old")["suggest_cleanup"] == 1 and sdb.get("fresh")["suggest_cleanup"] == 0
+    assert sdb.get("old")["needs_verify"] == 1 and sdb.get("old")["suggest_cleanup"] == 0
+    assert sdb.get("fresh")["needs_verify"] == 0
 ```
 В `tests/test_config.py` ничего не меняется, если новые поля читаются с дефолтами (см. Step 3).
 - [ ] **Step 2: Run** → Expected: SystemExit/ошибка парсинга аргументов.
@@ -663,14 +779,15 @@ def test_sources_import_suggest_export(tmp_path, monkeypatch, capsys):
 ```python
     sp = sub.add_parser("sources"); ssub = sp.add_subparsers(dest="scmd", required=True)
     pi = ssub.add_parser("import"); pi.add_argument("--export", required=True)
-    for n in ("suggest", "export", "stats"):
+    for n in ("flag", "export", "stats"):
         ssub.add_parser(n)
+    pv = ssub.add_parser("verify"); pv.add_argument("--limit", type=int, default=20)
 ```
 и обработка (до `db = DB(...)` не нужна):
 ```python
     if a.cmd == "sources":
         from datetime import datetime as _dt
-        from .sources.cleanup import export_cleanup, suggest_cleanup
+        from .sources.cleanup import export_cleanup, flag_for_verification
         from .sources.db import SourcesDB
         from .sources.importers import import_following, import_last_posts, import_saved_authors
         sdb = SourcesDB(s.data_dir / "sources.db")
@@ -680,8 +797,10 @@ def test_sources_import_suggest_export(tmp_path, monkeypatch, capsys):
             print("авторов сохранёнок новых:", import_saved_authors(
                 sdb, s.reels_pipeline / "items_by_key.json", s.reels_pipeline / "final_theme_map.json", a.export))
             print("дат постов обновлено:", import_last_posts(sdb, s.last_posts_file) if s.last_posts_file.is_file() else 0)
-        elif a.scmd == "suggest":
-            print("предложено на чистку:", suggest_cleanup(sdb, _dt.now(), s.cleanup_years))
+        elif a.scmd == "flag":
+            print("отложено на проверку:", flag_for_verification(sdb, _dt.now(), s.cleanup_years))
+        elif a.scmd == "verify":
+            print("читатель профиля Instagram пока не подключён (спайк S1), проверка не запущена")
         elif a.scmd == "export":
             print("в списке на удаление:", export_cleanup(sdb, s.data_dir / "cleanup.txt"))
         else:
@@ -690,27 +809,120 @@ def test_sources_import_suggest_export(tmp_path, monkeypatch, capsys):
 ```
 Блок вставляется сразу после `s, themes = load_settings(r), load_themes(r)`.
 - [ ] **Step 4: Run** `uv run pytest -q` → Expected: все зелёные.
-- [ ] **Step 5: Живой импорт (не TDD):** `uv run python -m reels_radar sources import --export ~/Downloads/сохраненное2`, затем `sources suggest`, `sources stats`. Записать числа в HANDOFF. Ожидание по данным: ~2466 подписок, ~1565+ авторов сохранёнок, предложений на чистку порядка 200-700 (старые 194 в `ig_dead_2plus`: сверить).
+- [ ] **Step 5: Живой импорт (не TDD):** `uv run python -m reels_radar sources import --export ~/Downloads/сохраненное2`, затем `sources flag`, `sources stats`. Записать числа в HANDOFF. Ожидание: ~2466 подписок, 1565+ авторов сохранёнок, отложено на проверку порядка сотен (старые 194 в `ig_dead_2plus` должны попасть в очередь). **Кандидатов на отписку пока нет**: они появляются только после полной проверки (Task 8 + читатель профиля).
 - [ ] **Step 6: Commit** `feat(sources): cli import/suggest/export`.
+
+---
+
+### Task 8: Проверка активности пакетом (читатель подменяемый)
+
+**Files:** Create `reels_radar/sources/verify.py`; Test `tests/sources/test_verify.py`
+
+**Interfaces:**
+- Consumes: `SourcesDB`, `Activity`, `record_activity`.
+- Produces: `verify_batch(sdb, reader, now, years=2, limit=20, sleep=time.sleep, pause=(1.0, 2.5)) -> dict[str,int]`, где `reader(username) -> Activity`. Берёт `needs_verify=1`, `followed=1`, `status!='personal'`, порядок: самые давние старые даты первыми, затем без дат. Для каждого: `log_check`, `record_activity`. Если `Activity.error` в `{"RATE", "LOGIN", "CHALLENGE"}`: остановка пакета, `stopped=<код>`. Счётчики: `active`, `inactive`, `unknown`, `stopped`. Настоящий читатель (Playwright, все 4 канала) пишется после спайка S1 и подключается в `cli.py` без изменения этой функции.
+
+- [ ] **Step 1: Failing test** `tests/sources/test_verify.py`:
+```python
+from datetime import datetime
+from reels_radar.sources.activity import Activity, CHANNELS
+from reels_radar.sources.verify import verify_batch
+
+NOW = datetime(2026, 10, 17)
+ALL = frozenset(CHANNELS)
+OLD = "2019-03-01T00:00:00.000Z"
+
+
+def seed(sdb, *names):
+    for n in names:
+        sdb.upsert(n, followed=1, needs_verify=1, last_post_at=OLD, posts_visible=1)
+
+
+def test_verify_batch_classifies_and_logs(sdb):
+    seed(sdb, "dead", "reeler")
+    def reader(u):
+        return Activity(last_post=OLD, last_reel="2026-09-01T00:00:00.000Z" if u == "reeler" else None, channels=ALL)
+    res = verify_batch(sdb, reader, NOW, limit=10, sleep=lambda s: None)
+    assert res["active"] == 1 and res["inactive"] == 1
+    assert sdb.get("dead")["suggest_cleanup"] == 1 and sdb.get("reeler")["suggest_cleanup"] == 0
+    assert sdb.c.execute("select count(*) from checks").fetchone()[0] == 2
+
+
+def test_verify_batch_stops_on_rate_limit_and_keeps_rest(sdb):
+    seed(sdb, "a", "b", "c")
+    calls = []
+    def reader(u):
+        calls.append(u)
+        return Activity(error="RATE", channels=ALL) if len(calls) == 2 else Activity(last_post=OLD, channels=ALL)
+    res = verify_batch(sdb, reader, NOW, limit=10, sleep=lambda s: None)
+    assert res["stopped"] == "RATE" and len(calls) == 2
+    assert sdb.get("c")["needs_verify"] == 1 and sdb.get("c")["verified"] == 0
+
+
+def test_verify_batch_respects_limit_and_skips_personal(sdb):
+    seed(sdb, "a", "b", "c")
+    sdb.update("a", status="personal")
+    seen = []
+    def reader(u):
+        seen.append(u); return Activity(last_post=OLD, channels=ALL)
+    verify_batch(sdb, reader, NOW, limit=1, sleep=lambda s: None)
+    assert len(seen) == 1 and "a" not in seen
+```
+- [ ] **Step 2: Run** → Expected: ImportError.
+- [ ] **Step 3: Implement** `reels_radar/sources/verify.py`:
+```python
+from __future__ import annotations
+
+import random
+import time
+from datetime import datetime
+
+from .cleanup import record_activity
+from .db import SourcesDB
+
+STOP = {"RATE", "LOGIN", "CHALLENGE"}
+
+
+def verify_batch(sdb: SourcesDB, reader, now: datetime, years: int = 2, limit: int = 20,
+                 sleep=time.sleep, pause=(1.0, 2.5)) -> dict:
+    rows = sdb.c.execute(
+        "SELECT username FROM accounts WHERE needs_verify=1 AND followed=1 AND status!='personal' "
+        "ORDER BY (last_post_at IS NULL), last_post_at ASC, username LIMIT ?", (limit,)).fetchall()
+    res = {"active": 0, "inactive": 0, "unknown": 0, "stopped": None}
+    for r in rows:
+        u = r["username"]
+        a = reader(u)
+        sdb.log_check(u, a.error or "ok")
+        if a.error in STOP:
+            res["stopped"] = a.error
+            break
+        res[record_activity(sdb, u, a, now, years)] += 1
+        sleep(random.uniform(*pause))
+    return res
+```
+- [ ] **Step 4: Run** `uv run pytest -q` → Expected: все зелёные.
+- [ ] **Step 5: Commit** `feat(sources): verify_batch with pluggable profile reader`.
 
 ---
 
 ### Task 7: Запуск в боте
 
 - [ ] **Step 1:** Перезапустить бота (`kill` процесса python, не только обёртки `uv`; проверить `pgrep -fl "reels_radar bot"`), чтобы подхватил `/cleanup`.
-- [ ] **Step 2:** Некит присылает `/cleanup`, жмёт 🗑/✅/👤 на 10 карточках. Проверить в `sources.db`: `intent`, `reviewed`, `status`.
-- [ ] **Step 3:** `/cleanup_list` выдаёт список, файл `data/cleanup.txt` создан. Некит отписывается вручную, шлёт `/done user1 user2`, статусы становятся `ignored`.
-- [ ] **Step 4:** Обновить `HANDOFF.md`: числа импорта, команды, что дальше (S1 спайк, S3 классификация).
+- [ ] **Step 2:** До подключения читателя профиля `/cleanup` отвечает «кандидатов на чистку нет»: это ожидаемо, кандидаты появляются только после полной проверки. Для проверки механики на живых данных Некит помечает 2-3 тестовых аккаунта вручную через SQL (`update accounts set suggest_cleanup=1, why='тест'`), жмёт 🗑/✅/👤 и убеждается, что `intent`, `reviewed`, `status` меняются; тестовые пометки откатываются.
+- [ ] **Step 3:** `/cleanup_list` выдаёт список, файл `data/cleanup.txt` создан. После ручной отписки `/done user1 user2` ставит `ignored`.
+- [ ] **Step 4:** Обновить `HANDOFF.md`: числа импорта и очереди проверки, команды, что дальше (спайк S1 и читатель профиля по 4 каналам, затем `sources verify`).
 - [ ] **Step 5: Commit** `docs: handoff sources S2`.
 
 ---
 
 ## Self-Review
 
-**Spec coverage (S2):** реестр с полями `intent` и `suggest_cleanup` (Task 1) ✓; импорт подписок, авторов сохранёнок, дат (Task 2) ✓; правила чистки и исключения personal/saved (Task 3) ✓; действия 🗑 ✅ 👤 и итоговый список (Task 4) ✓; `/cleanup`, `/cleanup_list`, `/done` (Task 5) ✓; CLI (Task 6) ✓. Кнопки ⏸ и ❌ для harvest-карточек и карточки кандидатов расширения графа относятся к S3-S4 и сюда не входят (отклонение, осознанное: S2 даёт пользу чистки без запросов к Instagram).
+**Spec coverage (S2):** реестр с полями `intent`, `suggest_cleanup`, каналами активности (Task 1) ✓; импорт подписок, авторов сохранёнок, старых дат как сигнала (Task 2) ✓; определение активности по всем четырём каналам, одного свежего сигнала достаточно, закрытый/ошибка/неполная проверка не ведут на чистку (Task 3) ✓; действия 🗑 ✅ 👤 и итоговый список (Task 4) ✓; `/cleanup`, `/cleanup_list`, `/done` (Task 5) ✓; CLI (Task 6) ✓; очередь проверки пакетом с остановкой по лимиту (Task 8) ✓. Кнопки ⏸ и ❌ для harvest-карточек и карточки кандидатов расширения графа относятся к S3-S4 и сюда не входят (отклонение, осознанное: S2 даёт пользу чистки без запросов к Instagram).
 
 **Placeholder scan:** заглушек нет. Task 7 Step 5 содержит ожидание порядка величин, это не заглушка кода, а проверка на живых данных.
 
-**Type consistency:** `SourcesDB.upsert/update/get/by_status`, `norm` одинаковы везде. `apply_action(sdb, username, action)` в Task 4 вызывается так же в Task 5 (импортирован как `acc_action`). `candidates/marked/export_cleanup/suggest_cleanup` совпадают в Task 3, 4, 5, 6. Callback `ac:<action>:<username>` формируется в `account_keyboard` и разбирается `parse_account_cb` (split по первым двум двоеточиям) ✓.
+**Type consistency:** `SourcesDB.upsert/update/get/by_status`, `norm` одинаковы везде. `apply_action(sdb, username, action)` в Task 4 вызывается так же в Task 5 (импортирован как `acc_action`). `candidates/marked/export_cleanup/flag_for_verification/record_activity` совпадают в Task 3, 4, 5, 6, 8; `Activity` и `CHANNELS` из `activity.py` одинаковы в Task 3 и 8. Callback `ac:<action>:<username>` формируется в `account_keyboard` и разбирается `parse_account_cb` (split по первым двум двоеточиям) ✓.
+
+**Отклонение от первой версии плана:** по замечанию Некита кандидаты на отписку больше не берутся из старых дат (они смотрели один канал). Полный вывод требует читателя профиля по 4 каналам, он появится после спайка S1.
 
 **Review Focus:** покрыты тестами: пустой/null юзернейм и регистр (Task 1-2), повторный импорт и ручные пометки (Task 2), personal и saved не предлагаются (Task 3), двойной 🗑 и смена решения (Task 4), юзернеймы с `.` `_` в callback (Task 4).
