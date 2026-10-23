@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .claude import run_claude
+from .claude import llm_fallback, run_claude_free
 from .config import Theme
 
 PURPOSES = ("note", "content", "product", "claude", "friend")
@@ -75,10 +75,16 @@ def build_prompt(code, caption, transcript, ocr_text, frames, themes, folder_the
     return "\n".join(parts)
 
 
-async def classify(s, themes, item, local, claude=run_claude, folder_theme=None, owner="") -> Verdict:
+async def classify(s, themes, item, local, claude=run_claude_free, folder_theme=None, owner="") -> Verdict:
     prompt = build_prompt(item.code, item.caption, local.transcript, local.ocr_text, local.frames,
                           themes, folder_theme)
     dirs = tuple({str(f.parent) for f in local.frames})
     raw = await claude(s, prompt, system=SYSTEM, schema=SCHEMA, tools=("Read",) if local.frames else (),
                        add_dirs=dirs, timeout=s.claude_timeout)
-    return validate(raw, themes, owner)
+    v = validate(raw, themes, owner)
+    if claude is run_claude_free and llm_fallback.last_backend.startswith("router"):
+        # запас без кадров: тему не доверяем (в тесте замера 61% совпадений), Некит выберет кнопкой 🏷
+        v.theme = folder_theme if folder_theme in themes else "Разное"
+        if not v.skip:
+            v.reason = "free:" + llm_fallback.last_backend
+    return v

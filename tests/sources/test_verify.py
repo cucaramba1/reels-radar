@@ -73,3 +73,11 @@ def test_chronically_failing_accounts_go_last(sdb):
         seen.append(u); return Activity(last_post=OLD, channels=ALL)
     verify_batch(sdb, reader, NOW, limit=1, sleep=lambda s: None)
     assert seen == ["good"]
+
+
+def test_budget_left_counts_today_only(sdb):
+    from reels_radar.sources.verify import budget_left
+    sdb.log_check("a", "ok"); sdb.log_check("b", "ok")
+    sdb.c.execute("INSERT INTO checks(username,ts,result) VALUES('c','2020-01-01T00:00:00','ok')"); sdb.c.commit()
+    assert budget_left(sdb, 5, datetime.now()) == 3
+    assert budget_left(sdb, 1, datetime.now()) == 0

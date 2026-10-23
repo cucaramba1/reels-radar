@@ -13,6 +13,17 @@ def test_card_has_no_long_dash(db):
     assert "—" not in text and "ИИ" in text and "суть" in text
 
 
-def test_theme_callback_fits_telegram_limit():
-    from reels_radar.cards import theme_cb
-    assert len(theme_cb(13, "A" * 11).encode()) <= 64
+def test_callbacks_fit_telegram_limit():
+    from reels_radar.cards import section_cb
+    assert len(section_cb("abcdef", "A" * 11).encode()) <= 64
+    for row in keyboard_spec("A" * 11):
+        assert all(len(d.encode()) <= 64 for _, d in row)
+
+
+def test_card_marks_free_model():
+    from reels_radar.cards import render_card
+    row = {"theme": "Разное", "purposes": "note", "kind": "знание", "summary": "с", "template": "",
+           "url": "u", "fail_reason": "free:router:m"}
+    assert "бесплатной моделью" in render_card(row)
+    row["fail_reason"] = None
+    assert "бесплатной" not in render_card(row)

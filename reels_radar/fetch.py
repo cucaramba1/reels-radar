@@ -14,6 +14,13 @@ def _video(dest: Path) -> Path | None:
     return next((p for p in sorted(Path(dest).glob("*")) if p.suffix.lower() in VID), None)
 
 
+def has_video_stream(p: Path) -> bool:
+    """Playwright иногда перехватывает аудиодорожку DASH под видом .mp4: без кадров это не рилс."""
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=index",
+                        "-of", "csv=p=0", str(p)], capture_output=True, text=True, timeout=60)
+    return bool(r.stdout.strip())
+
+
 def images(dest: Path) -> list[Path]:
     return [p for p in sorted(Path(dest).glob("*")) if p.suffix.lower() in IMG]
 
@@ -55,6 +62,9 @@ def fetch_chain(url: str, dest: Path, fetchers: list[Fetcher]) -> tuple[str, Pat
             return "RATE", None
         if st == "OK":
             v = _video(dest)
+            if v and not has_video_stream(v):
+                v.unlink()  # только звук: пробуем следующий загрузчик (фотопост отдаст картинки)
+                v = None
             if v:
                 return "OK", v
             if images(dest):

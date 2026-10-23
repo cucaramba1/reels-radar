@@ -28,3 +28,9 @@ def verify_batch(sdb: SourcesDB, reader, now: datetime, years: int = 2, limit: i
         res[record_activity(sdb, u, a, now, years)] += 1
         sleep(random.uniform(*pause))
     return res
+
+
+def budget_left(sdb: SourcesDB, budget: int, now: datetime) -> int:
+    """Сколько чтений профилей осталось на сегодня (считаем по журналу checks)."""
+    n = sdb.c.execute("SELECT COUNT(*) FROM checks WHERE substr(ts,1,10)=?", (now.strftime("%Y-%m-%d"),)).fetchone()[0]
+    return max(0, budget - n)

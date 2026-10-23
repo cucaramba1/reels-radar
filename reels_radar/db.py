@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 
 FIELDS = {"url", "caption", "ts", "folder", "owner", "status", "attempts", "fail_reason", "ocr_text", "transcript",
           "score", "theme", "purposes", "kind", "summary", "template", "title", "body", "note_path",
-          "note_created", "moc_line"}
+          "note_created", "moc_line", "decision", "note_vault", "moc_rel", "canvas_rel"}
 
 
 class DB:
@@ -29,11 +29,12 @@ class DB:
         self.c = sqlite3.connect(str(path))
         self.c.row_factory = sqlite3.Row
         self.c.executescript(SCHEMA)
-        try:
-            self.c.execute("ALTER TABLE items ADD COLUMN owner TEXT")
-            self.c.commit()
-        except sqlite3.OperationalError:
-            pass  # колонка уже есть
+        for col in ("owner", "decision", "note_vault", "moc_rel", "canvas_rel"):
+            try:
+                self.c.execute(f"ALTER TABLE items ADD COLUMN {col} TEXT")
+                self.c.commit()
+            except sqlite3.OperationalError:
+                pass  # колонка уже есть
 
     def add_item(self, code, url, caption, ts, folder=None, owner=None) -> bool:
         cur = self.c.execute(

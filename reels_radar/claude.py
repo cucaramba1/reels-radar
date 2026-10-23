@@ -4,8 +4,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
+from pathlib import Path
 
 from .config import Settings
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "llm_fallback"))
+import llm_fallback  # noqa: E402
 
 
 class BrainError(RuntimeError):
@@ -58,3 +63,8 @@ def is_limit(e: Exception) -> bool:
     """Лимит подписки или claude вообще не запускается: ночь обрывается, посты ждут без штрафа."""
     t = str(e).lower()
     return any(w in t for w in ("limit", "лимит", "usage", "не смог запустить"))
+
+
+async def run_claude_free(s: Settings, prompt: str, **kw):
+    """Claude, а при лимите запасной бесплатный роутер (только для задач, где качество допускает замену)."""
+    return await llm_fallback.with_fallback(run_claude, s, prompt, free_ok=True, is_limit=is_limit, **kw)

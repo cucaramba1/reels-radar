@@ -13,6 +13,8 @@ class Theme:
     name: str
     folder: str | None
     moc: str | None
+    vault: str | None = None   # корень другого vault (Досуг); None = основной
+    canvas: str | None = None  # путь холста относительно корня; по умолчанию <folder>.canvas
 
 
 @dataclass
@@ -35,6 +37,8 @@ class Settings:
     keywords: list[str]
     last_posts_file: Path
     cleanup_years: int
+    verify_daily_budget: int = 60
+    verify_pause: tuple = (6.0, 10.0)
 
 
 def load_settings(root: Path) -> Settings:
@@ -59,9 +63,13 @@ def load_settings(root: Path) -> Settings:
         keywords=[k.lower() for k in y["keywords"]],
         last_posts_file=Path(y.get("last_posts_file", "")),
         cleanup_years=int(y.get("cleanup_years", 2)),
+        verify_daily_budget=int(y.get("verify_daily_budget", 60)),
+        verify_pause=tuple(float(x) for x in y.get("verify_pause", [6, 10])),
     )
 
 
 def load_themes(root: Path) -> dict[str, Theme]:
     y = yaml.safe_load((root / "config" / "themes.yaml").read_text())
-    return {n: Theme(n, v.get("folder"), v.get("moc")) for n, v in y["themes"].items()}
+    vaults = y.get("vaults") or {}
+    return {n: Theme(n, v.get("folder"), v.get("moc"), vaults.get(v.get("vault")), v.get("canvas"))
+            for n, v in y["themes"].items()}
