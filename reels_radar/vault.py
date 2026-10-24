@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import uuid
@@ -10,8 +11,15 @@ from .config import Theme
 
 
 def safe_title(title: str) -> str:
-    t = re.sub(r'[\\/:*?"<>|]', "", title)
-    return re.sub(r"\s+", " ", t).strip()[:80] or "Без названия"
+    t = re.sub(r'[\\/:*?"<>|\[\]#^]', "", title)  # [ ] # ^ ломают [[ссылки]]
+    return re.sub(r"\s+", " ", t).strip().lstrip(".").strip()[:80] or "Без названия"
+
+
+def _write(path: Path, text: str) -> None:
+    """Через временный файл: обрыв на полпути не оставит полупустую заметку или битый холст."""
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text, encoding="utf8")
+    os.replace(tmp, path)
 
 
 def write_note(vault: Path, theme: Theme, title: str, body: str, code: str) -> tuple[Path, bool]:
@@ -25,17 +33,17 @@ def write_note(vault: Path, theme: Theme, title: str, body: str, code: str) -> t
     assert path.resolve().is_relative_to(folder.resolve())
     moc = (theme.moc or "")[:-3] if (theme.moc or "").endswith(".md") else (theme.moc or "")
     text = f"# {title.strip()}\n\n{body.strip()}\n\n## Связанные заметки\n- [[{moc}]]\n"
-    path.write_text(text, encoding="utf8")
+    _write(path, text)
     return path, True
 
 
 def add_moc_line(vault: Path, theme: Theme, title: str) -> str:
     moc = Path(vault) / theme.folder / theme.moc
-    line = f"- [[{safe_title(title)}]]"
+    line = f"- [[{title}]]"  # title уже stem файла, повторная обрезка ломала ссылку на «… (2)»
     text = moc.read_text(encoding="utf8") if moc.exists() else ""
     if line not in text:
         moc.parent.mkdir(parents=True, exist_ok=True)
-        moc.write_text(text.rstrip("\n") + "\n" + line + "\n", encoding="utf8")
+        _write(moc, text.rstrip("\n") + "\n" + line + "\n")
     return line
 
 
@@ -46,7 +54,10 @@ def rollback(vault: Path, db, code: str, themes: dict[str, Theme]) -> str:
     root = Path(r["note_vault"] or vault)
     src = root / r["note_path"]
     if src.exists():
-        dst = root / ".trash" / r["note_path"]
+        dst, n = root / ".trash" / r["note_path"], 2
+        while dst.exists():  # повторный откат не затирает прошлую копию
+            dst = root / ".trash" / f"{r['note_path'][:-3]} ({n}).md"
+            n += 1
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dst))
     theme = themes.get(r["theme"])
@@ -54,7 +65,7 @@ def rollback(vault: Path, db, code: str, themes: dict[str, Theme]) -> str:
     if moc_rel and r["moc_line"]:
         moc = root / moc_rel
         if moc.exists():
-            moc.write_text(moc.read_text(encoding="utf8").replace(r["moc_line"] + "\n", ""), encoding="utf8")
+            _write(moc, moc.read_text(encoding="utf8").replace(r["moc_line"] + "\n", ""))
     cv_rel = r["canvas_rel"] or (canvas_rel(theme) if theme and theme.folder else None)
     cv = root / cv_rel if cv_rel else None
     if cv and cv.exists():
@@ -63,7 +74,7 @@ def rollback(vault: Path, db, code: str, themes: dict[str, Theme]) -> str:
         if gone:
             data["nodes"] = [n for n in data["nodes"] if n["id"] not in gone]
             data["edges"] = [e for e in data.get("edges", []) if e.get("fromNode") not in gone and e.get("toNode") not in gone]
-            cv.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf8")
+            _write(cv, json.dumps(data, ensure_ascii=False, indent=2))
     db.update(code, status="draft", note_path=None, note_created=None, moc_line=None, decision=None,
               note_vault=None, moc_rel=None, canvas_rel=None)
     return "заметка перенесена в .trash"
@@ -96,7 +107,7 @@ def add_to_canvas(vault: Path, theme: Theme, note_rel: str) -> bool:
         data.setdefault("edges", []).append(
             {"id": uuid.uuid4().hex[:16], "fromNode": moc["id"], "fromSide": "bottom",
              "toNode": node["id"], "toSide": "top"})
-    cv.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf8")
+    _write(cv, json.dumps(data, ensure_ascii=False, indent=2))
     return True
 
 
@@ -131,7 +142,7 @@ def ensure_section(root: Path, sec, parent=None, intro: str = "") -> bool:
             if line not in t:
                 if "## Подразделы" not in t:
                     t = t.rstrip("\n") + "\n\n## Подразделы\n"
-                pmoc.write_text(t.rstrip("\n") + "\n" + line + "\n", encoding="utf8")
+                _write(pmoc, t.rstrip("\n") + "\n" + line + "\n")
         add_to_canvas(root, parent, f"{sec.folder}/{sec.moc}")
     return created
 

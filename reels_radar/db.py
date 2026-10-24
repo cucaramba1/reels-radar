@@ -26,8 +26,9 @@ FIELDS = {"url", "caption", "ts", "folder", "owner", "status", "attempts", "fail
 class DB:
     def __init__(self, path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.c = sqlite3.connect(str(path))
+        self.c = sqlite3.connect(str(path), timeout=30)
         self.c.row_factory = sqlite3.Row
+        self.c.execute("PRAGMA journal_mode=WAL")  # бот и ночной прогон пишут в одну базу
         self.c.executescript(SCHEMA)
         for col in ("owner", "decision", "note_vault", "moc_rel", "canvas_rel"):
             try:

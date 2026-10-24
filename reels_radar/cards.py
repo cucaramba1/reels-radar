@@ -18,8 +18,10 @@ def render_card(row, show_template: bool = False) -> str:
         pass
     if show_template and row["template"]:
         parts += ["", "Структура рилса:", row["template"]]
-    parts += ["", row["url"]]
-    return "\n".join(parts).replace("—", "-")
+    body = "\n".join(parts).replace("—", "-")
+    if len(body) > 3900:  # лимит Telegram 4096, ссылка должна остаться
+        body = body[:3900].rstrip() + "…"
+    return body + "\n\n" + row["url"]
 
 
 def keyboard_spec(code: str) -> list[list[tuple[str, str]]]:

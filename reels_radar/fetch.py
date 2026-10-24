@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -47,9 +49,16 @@ def fetch_gallerydl(url: str, dest: Path, cookies: Path) -> str:
 
 
 def fetch_playwright(url: str, dest: Path, script: Path, profile: Path) -> str:
-    p = subprocess.run([sys.executable, str(script), url, str(dest), str(profile)],
-                       capture_output=True, text=True, timeout=300)
-    return {0: "OK", 2: "LOGIN", 3: "RATE"}.get(p.returncode, "NO_VIDEO")
+    # своя группа процессов: по таймауту гасим и node-драйвер с Chromium, иначе они живут и держат профиль
+    p = subprocess.Popen([sys.executable, str(script), url, str(dest), str(profile)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+        code = p.wait(timeout=300)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.wait()
+        return "NO_VIDEO"
+    return {0: "OK", 2: "LOGIN", 3: "RATE"}.get(code, "NO_VIDEO")
 
 
 def fetch_chain(url: str, dest: Path, fetchers: list[Fetcher]) -> tuple[str, Path | None]:

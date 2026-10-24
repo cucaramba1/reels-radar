@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from aiogram import Bot, Dispatcher, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -12,6 +14,8 @@ from .sources.cards import account_keyboard, account_text, chunk_lines, parse_ac
 from .sources.cleanup import apply_action as acc_action, candidates, export_cleanup, marked
 from .sources.db import SourcesDB
 from .vault import catalog, rollback
+
+log = logging.getLogger(__name__)
 
 
 def kb(code):
@@ -24,7 +28,11 @@ async def send_pending(bot: Bot, db, owner_id: int, limit: int = 10) -> int:
     for r in db.by_status("draft", 200):
         if db.kv_get(f"sent:{r['code']}"):
             continue
-        await bot.send_message(owner_id, render_card(r), reply_markup=kb(r["code"]))
+        try:
+            await bot.send_message(owner_id, render_card(r), reply_markup=kb(r["code"]))
+        except TelegramBadRequest as e:  # одна битая карточка не должна держать всю очередь
+            log.warning("карточка %s не отправлена: %s", r["code"], e)
+            continue
         db.kv_set(f"sent:{r['code']}", "1")
         n += 1
         if n >= limit:
@@ -179,7 +187,8 @@ def router(s, db, themes, sdb=None) -> Router:
     @rt.message(Command("friends"), owner)
     async def friends(m: Message):
         rows = db.c.execute("SELECT summary,url FROM items WHERE purposes LIKE '%friend%' LIMIT 30").fetchall()
-        await m.answer("\n\n".join(f"{r['summary']}\n{r['url']}" for r in rows) or "пусто")
+        for part in chunk_lines([f"{r['summary']}\n{r['url']}\n" for r in rows]) or ["пусто"]:
+            await m.answer(part)
 
     @rt.message(Command("rollback"), owner)
     async def rb(m: Message):
@@ -199,7 +208,7 @@ async def run_bot(s, db, themes):
             try:
                 await send_pending(bot, db, s.owner_id)
             except Exception:
-                pass
+                log.exception("pump: отправка карточек упала")
             await asyncio.sleep(300)
 
     task = asyncio.create_task(pump())

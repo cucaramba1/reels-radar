@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 
 from .config import Theme
@@ -20,6 +21,7 @@ INSPO = {
     "ideas": Theme("Вдохновение: идеи", "Контент и соцсети/Вдохновение/Идеи", "Вдохновение — идеи — карта заметок.md",
                    None, "Вдохновение — идеи.canvas"),
 }
+log = logging.getLogger(__name__)
 INSPO_LABEL = {"visual": "визуал", "memes": "мемы", "ideas": "идеи"}
 
 
@@ -41,11 +43,15 @@ def _publish(db, code, sec: Theme, vault: Path, title: str, body: str, decision:
     if parent is not None:
         ensure_section(root, sec, parent)
     path, created = write_note(root, sec, title, body, code)
-    line = add_moc_line(root, sec, path.stem)
-    add_to_canvas(root, sec, str(path.relative_to(root)))
+    # статус сразу после заметки: если MOC или холст упадут, повторное нажатие не создаст «(2)», а ↩️ найдёт заметку
     db.update(code, status="written", note_path=str(path.relative_to(root)), note_created=int(created),
-              moc_line=line, note_vault=str(root), moc_rel=f"{sec.folder}/{sec.moc}", canvas_rel=canvas_rel(sec),
-              decision=decision)
+              note_vault=str(root), moc_rel=f"{sec.folder}/{sec.moc}", canvas_rel=canvas_rel(sec), decision=decision)
+    db.update(code, moc_line=add_moc_line(root, sec, path.stem))
+    try:
+        add_to_canvas(root, sec, str(path.relative_to(root)))
+    except (ValueError, OSError) as e:  # холст битый или Obsidian пишет его прямо сейчас
+        log.warning("холст %s не обновлён: %s", canvas_rel(sec), e)
+        return f"записано: {path.name} (на холст не добавлено, холст не читается)"
     return f"записано: {path.name}"
 
 
