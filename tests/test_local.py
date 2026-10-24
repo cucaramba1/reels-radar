@@ -34,7 +34,7 @@ def test_no_speech_is_empty_not_error(tmp_path, monkeypatch):
     from reels_radar import local
     def fake(*a, **k):
         (tmp_path / "stt").mkdir(exist_ok=True)
-        (tmp_path / "stt" / "v.txt").write_text("")
+        (tmp_path / "stt" / "v.json").write_text('{"text": "", "segments": []}')
         return subprocess.CompletedProcess(a, 0, "", "")
     monkeypatch.setattr(local, "has_audio", lambda v: True)
     monkeypatch.setattr(local.subprocess, "run", fake)
@@ -61,3 +61,37 @@ def test_image_post_uses_images_and_skips_whisper(tmp_path, monkeypatch):
         max_frames = 6; reels_tools = tmp_path; whisper_bin = "w"; whisper_model = "m"; keywords = []
     lr = local.analyze_local(S(), tmp_path, tmp_path / "work", "подпись")
     assert lr.transcript == "" and "текст слайда" in lr.ocr_text and len(lr.frames) == 2
+
+
+
+def _fake_whisper(tmp_path, monkeypatch, result):
+    import json, subprocess
+    from reels_radar import local
+    def fake(*a, **k):
+        (tmp_path / "stt").mkdir(exist_ok=True)
+        (tmp_path / "stt" / "v.json").write_text(json.dumps(result, ensure_ascii=False))
+        return subprocess.CompletedProcess(a, 0, "", "")
+    monkeypatch.setattr(local, "has_audio", lambda v: True)
+    monkeypatch.setattr(local.subprocess, "run", fake)
+    return local.transcribe("w", "m", tmp_path / "v.mp4", tmp_path / "stt")
+
+
+def test_music_hallucination_is_dropped(tmp_path, monkeypatch):
+    segs = [{"no_speech_prob": 0.8, "avg_logprob": -0.9}, {"no_speech_prob": 0.7, "avg_logprob": -0.7},
+            {"no_speech_prob": 0.1, "avg_logprob": -0.2}]
+    assert _fake_whisper(tmp_path, monkeypatch, {"text": "Продолжение следует... Субтитры сделал DimaTorzok", "segments": segs}) == ""
+
+
+def test_real_speech_is_kept(tmp_path, monkeypatch):
+    segs = [{"no_speech_prob": 0.02, "avg_logprob": -0.2}, {"no_speech_prob": 0.6, "avg_logprob": -0.3}]
+    text = "Сегодня покажу, как настроить Claude Code за пять минут"
+    assert _fake_whisper(tmp_path, monkeypatch, {"text": text, "segments": segs}) == text
+
+
+
+def test_stock_whisper_phrases_are_dropped(tmp_path, monkeypatch):
+    ok = [{"no_speech_prob": 0.0, "avg_logprob": -0.7}]
+    for t in ("Thank you.", "Продолжение следует... Субтитры сделал DimaTorzok", "Спасибо за просмотр!"):
+        assert _fake_whisper(tmp_path, monkeypatch, {"text": t, "segments": ok}) == ""
+    t = "Спасибо за просмотр, а теперь про настройку бота в Telegram"
+    assert _fake_whisper(tmp_path, monkeypatch, {"text": t, "segments": ok}) == t

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from dataclasses import dataclass
@@ -69,14 +70,33 @@ def transcribe(whisper_bin: str, model: str, video: Path, tmp: Path) -> str:
     if not has_audio(video):
         return ""  # беззвучный ролик: речи нет, это не сбой
     tmp.mkdir(parents=True, exist_ok=True)
-    p = subprocess.run([whisper_bin, str(video), "--model", model, "--output-format", "txt",
+    p = subprocess.run([whisper_bin, str(video), "--model", model, "--output-format", "json",
                         "--output-dir", str(tmp), "--verbose", "False", "--condition-on-previous-text", "False"],
                        capture_output=True, text=True, timeout=900)
-    f = tmp / (video.stem + ".txt")
+    f = tmp / (video.stem + ".json")
     if p.returncode != 0 or not f.exists():
         raise RuntimeError(f"whisper failed: {(p.stderr or '')[-200:]}")
-    text = f.read_text().strip()
+    res = json.loads(f.read_text() or "{}")
+    if is_hallucination(res.get("segments") or []):
+        return ""  # музыка без слов: Whisper уверенно выдумывает текст, такой транскрипт хуже пустого
+    text = (res.get("text") or "").strip()
+    if _STOCK.sub("", text).strip(" .,!?…-") == "":
+        return ""  # только дежурные фразы, которые Whisper пишет на музыке и тишине
     return text if len(text) >= 15 else ""
+
+
+# Типовые галлюцинации Whisper (выучены на субтитрах YouTube): на музыке он пишет их уверенно,
+# no_speech_prob при этом бывает 0.0 (живая проверка 25.10: синус 440 Гц дал «Thank you.»)
+_STOCK = re.compile(r"(?i)(субтитры (сделал|создавал|подготовил)\w*[^.!?\n]*|редактор субтитров[^.!?\n]*|"
+                    r"продолжение следует|спасибо за (просмотр|внимание)|подписывайтесь на (канал|наш канал)|"
+                    r"thank you( for watching)?|thanks for watching|please subscribe|you)[.!?…]*")
+
+
+def is_hallucination(segments: list[dict]) -> bool:
+    """По клипу целиком (приём из kurbaitaev/saved-to-notes): половина сегментов похожа на тишину
+    (no_speech_prob > 0.5) и при этом модель не уверена в словах (avg_logprob < -0.5)."""
+    bad = sum(1 for g in segments if g.get("no_speech_prob", 0) > 0.5 and g.get("avg_logprob", 0) < -0.5)
+    return bool(segments) and bad * 2 >= len(segments)
 
 
 def analyze_local(s: Settings, video: Path, workdir: Path, caption: str = "") -> LocalResult:
