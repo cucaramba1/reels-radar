@@ -6,7 +6,7 @@ import logging
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Message
 
 from .cards import HELP, done_menu, idea_menu, inspo_menu, keyboard_spec, note_menu, parse_callback, render_card, section_cb
 from .decisions import decision_label, find_section, new_section, proposed, reject, sec_hash, undo, write_idea, write_inspiration, write_note_to
@@ -179,6 +179,18 @@ def router(s, db, themes, sdb=None) -> Router:
             msg = write_note_to(db, code, sec, s.vault, intro)
             r = db.get(code)
             await m.answer(f"{msg} (холст «{sec.folder}»)", reply_markup=mk(done_menu(decision_label(r), code)))
+
+    @rt.message(Command("find"), owner)
+    async def find(m: Message):
+        q = (m.text or "").split(maxsplit=1)[1:] or [""]
+        rows = db.search(q[0])
+        if not rows:
+            await m.answer("Ничего не нашёл. Формат: /find монтаж звук")
+            return
+        lines = [f"{'📝' if r['note_path'] else '·'} {r['title'] or (r['summary'] or '')[:80]}\n"
+                 f"   {r['note_path'] or r['status']} | {r['url']}" for r in rows]
+        for part in chunk_lines(lines):
+            await m.answer(part, link_preview_options=LinkPreviewOptions(is_disabled=True))
 
     @rt.message(Command("status"), owner)
     async def status(m: Message):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -62,6 +63,20 @@ class DB:
 
     def counts(self) -> dict[str, int]:
         return {r[0]: r[1] for r in self.c.execute("SELECT status, COUNT(*) FROM items GROUP BY status")}
+
+    def search(self, query: str, limit: int = 10) -> list:
+        """Поиск по названию, сути, речи и тексту на экране (FTS5, слова по префиксу: «монтаж» найдёт «монтажёр»).
+        Индекс временный, в памяти: строк мало, а без триггеров нечему рассинхронизироваться."""
+        words = [w for w in re.findall(r"\w+", query.lower()) if len(w) > 1]
+        if not words:
+            return []
+        self.c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS temp.f USING fts5(code UNINDEXED, title, summary, transcript, ocr)")
+        self.c.execute("DELETE FROM temp.f")
+        self.c.execute("INSERT INTO temp.f SELECT code, title, summary, transcript, ocr_text FROM items "
+                       "WHERE status NOT IN ('new','failed','no_video')")
+        q = " ".join(f'"{w}"*' for w in words)
+        return self.c.execute("SELECT i.* FROM temp.f JOIN items i ON i.code=f.code WHERE f MATCH ? "
+                              "ORDER BY bm25(f) LIMIT ?", (q, limit)).fetchall()
 
     def kv_get(self, key, default=None):
         r = self.c.execute("SELECT v FROM kv WHERE k=?", (key,)).fetchone()

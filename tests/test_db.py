@@ -32,3 +32,15 @@ def test_owner_column_and_migration(tmp_path):
     db = DB(p)
     db.add_item("A", "u", "c", 1, owner="bob")
     assert db.get("A")["owner"] == "bob"
+
+
+def test_search_by_word_prefix_over_transcript_and_title(db):
+    db.add_item("A", "https://i/reel/A/", "", 1)
+    db.update("A", status="written", title="Звук в монтаже", transcript="как чистить шумы", summary="суть", note_path="x/A.md")
+    db.add_item("B", "https://i/reel/B/", "", 2)
+    db.update("B", status="draft", title="Йога утром", transcript="растяжка спины", summary="суть")
+    db.add_item("C", "https://i/reel/C/", "", 3)  # new: в поиск не идёт
+    db.update("C", title="монтажёр без дела")
+    assert [r["code"] for r in db.search("монтаж")] == ["A"]
+    assert [r["code"] for r in db.search("растяжк")] == ["B"]
+    assert db.search("!!") == [] and db.search("нет такого") == []
