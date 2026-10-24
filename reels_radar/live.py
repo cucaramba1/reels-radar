@@ -14,7 +14,9 @@ async def run_live(s, db, themes, limit=None):
     free = shutil.disk_usage(Path.home()).free / 1e9
     if free < s.min_free_gb:
         return {"error": "мало места на диске"}
-    light = free < s.light_below_gb  # ночь не пропускаем: тяжёлое (видео + Whisper) откладываем, остальное разбираем
+    # ночь не пропускаем: тяжёлое (видео + Whisper) откладываем, остальное разбираем.
+    # Флаг сторожа: data/ бота выше DISK_CAPS (tools/resource-guard)
+    light = free < s.light_below_gb or (Path.home() / "Claude Code/tools/resource-guard/state/diskcap-reels-radar").exists()
     cookies = s.reels_tools / "ig_cookies.txt"
     pw = (s.root / "scripts" / "pw_fetch.py", s.data_dir / "pw-profile")
     chain = [partial(fetch_ytdlp, cookies=cookies),
