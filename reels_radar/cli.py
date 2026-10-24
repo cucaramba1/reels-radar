@@ -72,7 +72,12 @@ def main(argv=None) -> int:
         n = ingest(parse_export(Path(a.export_dir)), known_codes(s.reels_pipeline, s.reels_tools, db), db)
         print(f"новых: {n}")
     elif a.cmd == "digest":
-        text = build_digest(db, (datetime.now() - timedelta(days=a.days)).isoformat())
+        import subprocess
+        try:
+            ver = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True, timeout=30).stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            ver = None
+        text = build_digest(db, (datetime.now() - timedelta(days=a.days)).isoformat(), mark_repeat=a.send, ytdlp_version=ver)
         print(text)
         if a.send:
             async def _send():
