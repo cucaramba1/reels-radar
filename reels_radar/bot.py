@@ -62,6 +62,18 @@ def router(s, db, themes, sdb=None) -> Router:
         for part in chunk_lines(lines) or ["список пуст"]:
             await m.answer(part)
 
+    @rt.message(Command("clean"), owner)
+    async def clean(m: Message):
+        rows = marked(sdb)
+        if not rows:
+            await m.answer("на чистке никого нет")
+        for i in range(0, len(rows), 10):
+            pack = rows[i:i + 10]
+            links = "\n".join(f"https://instagram.com/{r['username']}" for r in pack)
+            names = " ".join(r["username"] for r in pack)
+            await m.answer(f"{links}\n\nотписался, жми и отправь:\n<code>/done {names}</code>",
+                           parse_mode="HTML", disable_web_page_preview=True)
+
     @rt.message(Command("done"), owner)
     async def done(m: Message):
         users = (m.text or "").split()[1:]
