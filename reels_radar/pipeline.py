@@ -7,6 +7,11 @@ from .claude import is_limit
 from .review import save_verdict
 
 MAX_ATTEMPTS = 3
+PAUSE_ALERT = {
+    "LOGIN": "🔑 Instagram просит логин: сессия в куках умерла, ночь на паузе. Обнови tools/reels/ig_cookies.txt "
+             "(экспорт кук из браузера, где IG залогинен), рилсы подождут без штрафа.",
+    "RATE": "⏳ Instagram ограничил запросы (429), ночь на паузе. Ничего делать не надо, следующая ночь продолжит.",
+}
 
 
 def _is_reel(url: str) -> bool:
@@ -30,6 +35,7 @@ async def run_batch(s, db, themes, *, fetch, local, classify, limit=None, light=
             status, video = fetch(r, work)
             if status in ("RATE", "LOGIN"):
                 db.kv_set("paused", "1"); stats["paused"] = 1
+                db.kv_set("alert", PAUSE_ALERT[status])  # бот пришлёт в ближайшие 5 минут
                 break
             if status != "OK":
                 db.update(code, status="no_video", attempts=r["attempts"] + 1, fail_reason=status)

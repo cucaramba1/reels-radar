@@ -206,6 +206,9 @@ async def run_bot(s, db, themes):
     async def pump():
         while True:
             try:
+                if alert := db.kv_get("alert"):  # от ночного прогона (другой процесс): пауза из-за логина/лимита IG
+                    await bot.send_message(s.owner_id, alert)
+                    db.kv_set("alert", "")
                 await send_pending(bot, db, s.owner_id)
             except Exception:
                 log.exception("pump: отправка карточек упала")

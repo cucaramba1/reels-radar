@@ -125,3 +125,10 @@ def test_light_night_defers_videos_without_penalty_and_runs_carousels(db, tmp_pa
     for code in ("R", "V"):
         assert (db.get(code)["status"], db.get(code)["attempts"]) == ("new", 0)
     assert db.get("C")["status"] == "draft"
+
+
+def test_login_pause_leaves_alert_for_bot(db, tmp_path):
+    db.add_item("A", "https://www.instagram.com/reel/A/", "c", 1)
+    stats = run(db, tmp_path, fetch=lambda r, w: ("LOGIN", None), local=mk_local(80), classify=ok_classify)
+    assert stats["paused"] == 1 and "ig_cookies" in db.kv_get("alert")
+    assert (db.get("A")["status"], db.get("A")["attempts"]) == ("new", 0)
