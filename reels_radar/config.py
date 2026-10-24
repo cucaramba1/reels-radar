@@ -38,6 +38,7 @@ class Settings:
     last_posts_file: Path
     cleanup_years: int
     verify_daily_budget: int = 60
+    light_below_gb: float = 10.0  # меньше свободно: «лёгкая ночь», видео ждут, карусели идут
     verify_pause: tuple = (6.0, 10.0)
 
 
@@ -63,6 +64,7 @@ def load_settings(root: Path) -> Settings:
         keywords=[k.lower() for k in y["keywords"]],
         last_posts_file=Path(y.get("last_posts_file", "")),
         cleanup_years=int(y.get("cleanup_years", 2)),
+        light_below_gb=float(y.get("light_below_gb", 10)),
         verify_daily_budget=int(y.get("verify_daily_budget", 60)),
         verify_pause=tuple(float(x) for x in y.get("verify_pause", [6, 10])),
     )

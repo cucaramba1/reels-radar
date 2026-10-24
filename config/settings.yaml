@@ -7,7 +7,8 @@ whisper_model: mlx-community/whisper-large-v3-turbo
 select_threshold: 10
 max_frames: 6
 batch_size: 20
-min_free_gb: 3
+min_free_gb: 3          # меньше: ночь не запускается совсем (при 3 ГБ и swap 7 ГБ 25.10 всё легло)
+light_below_gb: 10      # меньше: лёгкая ночь, видео-рилсы ждут без штрафа (Whisper + swap), карусели и фото идут
 claude_timeout: 300
 keywords: [claude, клод, mcp, скилл, промпт, монтаж, съёмка, хук, нячанг, йога, продуктивность]
 last_posts_file: /Users/cucaramba/Claude Code/tmp/ig_last_post_dates.jsonl

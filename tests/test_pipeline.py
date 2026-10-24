@@ -105,3 +105,23 @@ def test_whisper_failure_is_failed_not_archived(db, tmp_path):
     async def boom(row, lr): raise AssertionError("no")
     run(db, tmp_path, fetch=ok_fetch, local=bad_local, classify=boom)
     assert db.get("A")["status"] == "failed"
+
+
+def test_light_night_defers_videos_without_penalty_and_runs_carousels(db, tmp_path):
+    db.add_item("R", "https://www.instagram.com/reel/R/", "c", 1)
+    db.add_item("V", "https://www.instagram.com/p/V/", "c", 2)  # пост /p/, а внутри видео
+    db.add_item("C", "https://www.instagram.com/p/C/", "c", 3)
+    fetched = []
+
+    def fetch(row, workdir):
+        fetched.append(row["code"])
+        if row["code"] == "C":
+            d = Path(workdir); d.mkdir(parents=True, exist_ok=True); (d / "1.jpg").write_bytes(b"x")
+            return "OK", d
+        return ok_fetch(row, workdir)
+
+    stats = run(db, tmp_path, fetch=fetch, local=mk_local(80), classify=ok_classify, light=True)
+    assert "R" not in fetched and stats["deferred"] == 2
+    for code in ("R", "V"):
+        assert (db.get(code)["status"], db.get(code)["attempts"]) == ("new", 0)
+    assert db.get("C")["status"] == "draft"

@@ -11,8 +11,10 @@ from .vision import classify
 
 
 async def run_live(s, db, themes, limit=None):
-    if shutil.disk_usage(Path.home()).free / 1e9 < s.min_free_gb:
+    free = shutil.disk_usage(Path.home()).free / 1e9
+    if free < s.min_free_gb:
         return {"error": "мало места на диске"}
+    light = free < s.light_below_gb  # ночь не пропускаем: тяжёлое (видео + Whisper) откладываем, остальное разбираем
     cookies = s.reels_tools / "ig_cookies.txt"
     pw = (s.root / "scripts" / "pw_fetch.py", s.data_dir / "pw-profile")
     chain = [partial(fetch_ytdlp, cookies=cookies),
@@ -32,4 +34,4 @@ async def run_live(s, db, themes, limit=None):
         it = It(); it.code, it.caption = row["code"], row["caption"]
         return await classify(s, themes, it, lr, folder_theme=row["folder"], owner=row["owner"] or "")
 
-    return await run_batch(s, db, themes, fetch=fetch, local=local, classify=cls, limit=limit)
+    return await run_batch(s, db, themes, fetch=fetch, local=local, classify=cls, limit=limit, light=light)
