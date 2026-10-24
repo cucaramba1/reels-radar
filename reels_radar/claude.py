@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import os
 import sys
 from pathlib import Path
@@ -59,10 +60,16 @@ async def run_claude(s: Settings, prompt: str, *, system: str, schema: dict | No
 
 
 
+# Формулировки из логов (You've hit your session/weekly limit · resets ...) и из бинаря claude 25.10.2026
+_LIMIT = re.compile(r"hit your \w+ limit|limit reached|reached your \w+ (usage )?limit|out of extra usage|лимит|не смог запустить")
+
+
 def is_limit(e: Exception) -> bool:
     """Лимит подписки или claude вообще не запускается: ночь обрывается, посты ждут без штрафа."""
     t = str(e).lower()
-    return any(w in t for w in ("limit", "лимит", "usage", "не смог запустить"))
+    if "context limit" in t or "usage:" in t:  # переполнен контекст / справка CLI при кривых флагах: это не лимит подписки
+        return False
+    return bool(_LIMIT.search(t))
 
 
 async def run_claude_free(s: Settings, prompt: str, **kw):
