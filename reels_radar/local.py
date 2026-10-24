@@ -53,6 +53,49 @@ def extract_frames(video: Path, out: Path, n: int) -> list[Path]:
     return sorted(out.glob("f*.jpg"))
 
 
+SHOT_MAX, SHOT_MIN_SEC, NO_SPEECH_CHARS = 10, 0.8, 200
+
+
+def _duration(video: Path) -> float:
+    raw = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(video)],
+                         capture_output=True, text=True, timeout=60).stdout.strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.0
+
+
+def shot_times(cuts: list[float], dur: float, n_max: int = SHOT_MAX) -> list[float]:
+    """Моменты для кадров: по одному на план, на 45% его длины; планы короче 0.8 с вливаются в соседний.
+    Края ролика (по 8%) не берём: там заставки и логотипы. Приём из kurbaitaev/saved-to-notes (shots.py, acquire.py)."""
+    lo, hi = dur * 0.08, dur * 0.92
+    bounds = [lo] + [c for c in sorted(cuts) if lo < c < hi] + [hi]
+    shots: list[list[float]] = []
+    for a, b in zip(bounds, bounds[1:]):
+        if shots and b - a < SHOT_MIN_SEC:
+            shots[-1][1] = b
+        else:
+            shots.append([a, b])
+    times = [a + (b - a) * 0.45 for a, b in shots if b - a > 0]
+    if len(times) > n_max:  # слишком много планов: равномерно прореживаем
+        times = [times[round(i * (len(times) - 1) / (n_max - 1))] for i in range(n_max)]
+    return times
+
+
+def scene_cuts(video: Path, threshold: float = 0.2) -> list[float]:
+    p = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(video), "-an", "-vf", f"select='gt(scene,{threshold})',showinfo",
+                        "-f", "null", "-"], capture_output=True, text=True, timeout=300)
+    return [float(m) for m in re.findall(r"pts_time:([\d.]+)", p.stderr)]
+
+
+def frames_at(video: Path, out: Path, times: list[float]) -> list[Path]:
+    out.mkdir(parents=True, exist_ok=True)
+    for i, t in enumerate(times):
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-ss", f"{t:.2f}", "-i", str(video),
+                        "-frames:v", "1", "-vf", "scale=720:-2", "-q:v", "4", str(out / f"f{i:02d}.jpg")], timeout=60)
+    return sorted(out.glob("f*.jpg"))
+
+
 def run_ocr(ocr_bin: Path, paths: list[Path]) -> list[str]:
     if not paths:
         return []
@@ -106,7 +149,11 @@ def analyze_local(s: Settings, video: Path, workdir: Path, caption: str = "") ->
         frames = images(video)[: s.max_frames]
         transcript = ""
     else:
-        frames = extract_frames(video, workdir / "frames", s.max_frames)
         transcript = transcribe(s.whisper_bin, s.whisper_model, video, workdir / "stt")
+        frames = []
+        if len(transcript) < NO_SPEECH_CHARS:  # без речи весь смысл в кадрах: кадр на каждый план, а не 6 через равные промежутки
+            times = shot_times(scene_cuts(video), _duration(video))
+            frames = frames_at(video, workdir / "frames", times) if len(times) > s.max_frames else []
+        frames = frames or extract_frames(video, workdir / "frames", s.max_frames)
     ocr_text = " / ".join(clean_lines(run_ocr(s.reels_tools / "ocr", frames)))
     return LocalResult(transcript, ocr_text, score(transcript, ocr_text, caption, s.keywords), frames)

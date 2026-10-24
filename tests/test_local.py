@@ -95,3 +95,27 @@ def test_stock_whisper_phrases_are_dropped(tmp_path, monkeypatch):
         assert _fake_whisper(tmp_path, monkeypatch, {"text": t, "segments": ok}) == ""
     t = "Спасибо за просмотр, а теперь про настройку бота в Telegram"
     assert _fake_whisper(tmp_path, monkeypatch, {"text": t, "segments": ok}) == t
+
+
+def test_shot_times_one_frame_per_shot_merges_short_and_caps():
+    from reels_radar.local import shot_times
+    t = shot_times([2, 4, 4.3, 6], 10.0)  # края 0.8 и 9.2; план 4-4.3 короче 0.8 с вливается в предыдущий
+    assert len(t) == 4 and all(0.8 < x < 9.2 for x in t)
+    assert len(shot_times([i * 0.9 for i in range(1, 60)], 60.0, n_max=10)) == 10
+
+
+def test_scene_cuts_on_real_ffmpeg(tmp_path):
+    import shutil, subprocess
+    import pytest
+    from reels_radar.local import scene_cuts, shot_times
+    if not shutil.which("ffmpeg"):
+        pytest.skip("нет ffmpeg")
+    colors = ["red", "green", "blue", "yellow", "white", "black", "purple", "orange"]
+    src = sum((["-f", "lavfi", "-i", f"color={c}:s=320x240:d=2:r=10"] for c in colors), [])
+    flt = "".join(f"[{i}:v]" for i in range(len(colors))) + f"concat=n={len(colors)}:v=1:a=0[v]"
+    v = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", *src, "-filter_complex", flt, "-map", "[v]", str(v)], check=True)
+    cuts = scene_cuts(v)
+    # 7 склеек; пару цветов с близкой яркостью детектор при 0.2 может не различить, это не страшно
+    assert len(cuts) >= 5 and all(abs(c - round(c / 2) * 2) < 0.3 for c in cuts)
+    assert len(shot_times(cuts, 16.0)) == len(cuts)  # крайние полупланы влились в соседей
