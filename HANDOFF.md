@@ -88,3 +88,13 @@ S3 классификация аккаунтов claude и сбор постов
 ## launchd (22.10.2026, установлено по разрешению Некита)
 - В ~/Library/LaunchAgents: `com.cucaramba.reels-radar-bot` (RunAtLoad+KeepAlive), `-night` (run --limit 60, 03:00), `-digest` (digest --send, вс 19:00). Исходники в reels-radar/launchd/, логи в logs/.
 - Бот теперь под launchd: остановка `launchctl bootout gui/$(id -u)/com.cucaramba.reels-radar-bot` (kill по pid перезапустит). Читатель профилей: `sources verify` ~57/день вручную, очередь 570.
+
+## 24-25.10.2026: дайджест, отписки, слот тяжёлых задач (читать первым)
+- Первый дайджест отправлен вручную (`digest --days 30 --send`). Еженедельный: launchd вс 19:00.
+- Отписки: проверено 280 профилей, Некит отписался от 30. В боте `/clean` (ссылки пачками по 10 + готовая строка `/done ...`). Группа Telegram «Отписки» (-5544644805, Некит + бот): команды там с `@cucaramba_reels_radar_bot`, работу бота в группе не проверяли. Удалить группу, когда чистка закончится.
+- Очередь проверки: 351 needs_verify, дальше слой «без даты, не в очереди» (289) и «1-2 года» (144), для них ещё не ставили флаг. Бюджет `verify_daily_budget: 120` (вернуть 60 после чистки).
+- 25.10 бот «не грузил»: resource-guard снимал его при pressure 2 (72 SHED за день), причина: тяжёлое (120 чтений Chromium) рядом с остальным. Решение: `tools/slot` (README там), план docs/superpowers/plans/2026-10-25-slot-queue-pilot.md.
+- Слот (пилот): `reels-night` и `reels-verify` идут через `com.cucaramba.slot-tick` (раз в 5 мин), фиксированный night снят (plist в launchd/*.off-1025). `run` и `sources verify` уступают по флагу между элементами, выход 75. Живьём проверено: тик запускает задачи, yield останавливает verify через 2 с после профиля, Chromium закрывается.
+- Сторож: reels-radar-bot в TIER2, на уровне 1 сначала yield слота, TIER1 снимается с 3-й проверки. Бэкап resource-guard.sh.bak-1025.
+- Хук UserPromptSubmit в ~/.claude/settings.json (бэкап .bak-1025-slot) трогает tools/slot/state/interactive.
+- Дальше: сутки наблюдения (SHED reels-radar-bot = 0, число SHED ниже 72/сутки, задачи слота отработали сами), затем перенос tg-harvester night/audit (приоритет 10), idea-bot, остальных по одному. Потом подпроект B.
