@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.cucaramba.reels-radar-night</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/cucaramba/Claude Code/reels-radar/.venv/bin/python</string>
+		<string>-m</string>
+		<string>reels_radar</string>
+		<string>run</string>
+		<string>--limit</string>
+		<string>60</string>
+	</array>
+	<key>StandardErrorPath</key>
+	<string>/Users/cucaramba/Claude Code/reels-radar/logs/night.err.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/cucaramba/Claude Code/reels-radar/logs/night.out.log</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>1</integer>
+		<key>Minute</key>
+		<integer>30</integer>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/Users/cucaramba/Claude Code/reels-radar</string>
+</dict>
+</plist>

@@ -13,5 +13,5 @@ claude_timeout: 300
 keywords: [claude, клод, mcp, скилл, промпт, монтаж, съёмка, хук, нячанг, йога, продуктивность]
 last_posts_file: /Users/cucaramba/Claude Code/tmp/ig_last_post_dates.jsonl
 cleanup_years: 2
-verify_daily_budget: 60
+verify_daily_budget: 120
 verify_pause: [6, 10]
