@@ -81,3 +81,21 @@ def test_budget_left_counts_today_only(sdb):
     sdb.c.execute("INSERT INTO checks(username,ts,result) VALUES('c','2020-01-01T00:00:00','ok')"); sdb.c.commit()
     assert budget_left(sdb, 5, datetime.now()) == 3
     assert budget_left(sdb, 1, datetime.now()) == 0
+
+
+def test_verify_batch_yields_between_profiles(sdb):
+    seed(sdb, "a", "b", "c")
+    calls = []
+    def reader(u):
+        calls.append(u); return Activity(last_post=OLD, channels=ALL)
+    res = verify_batch(sdb, reader, NOW, limit=10, sleep=lambda s: None, yield_check=lambda: len(calls) >= 2)
+    assert res["stopped"] == "YIELD" and len(calls) == 2
+    assert sdb.c.execute("select count(*) from checks").fetchone()[0] == 2
+
+
+def test_should_yield_reads_flag(tmp_path, monkeypatch):
+    from reels_radar.slot import should_yield
+    f = tmp_path / "y"; monkeypatch.setenv("SLOT_YIELD", str(f))
+    assert not should_yield()
+    f.touch()
+    assert should_yield()

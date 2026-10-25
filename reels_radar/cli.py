@@ -11,6 +11,7 @@ from .db import DB
 from .dedup import ingest, known_codes
 from .digest import build_digest
 from .export import parse_export
+from .slot import YIELDED
 
 
 def root() -> Path:
@@ -59,9 +60,12 @@ def main(argv=None) -> int:
                 return 0
             reader = ProfileReader(s.data_dir / "pw-profile")
             try:
-                print(verify_batch(sdb, reader, _dt.now(), s.cleanup_years, limit=left, pause=s.verify_pause))
+                res = verify_batch(sdb, reader, _dt.now(), s.cleanup_years, limit=left, pause=s.verify_pause)
+                print(res)
             finally:
                 reader.close()
+            if res["stopped"] == "YIELD":
+                return YIELDED
         elif a.scmd == "export":
             print("в списке на удаление:", export_cleanup(sdb, s.data_dir / "cleanup.txt"))
         else:
@@ -91,7 +95,10 @@ def main(argv=None) -> int:
             asyncio.run(_send())
     elif a.cmd == "run":
         from .live import run_live
-        print(asyncio.run(run_live(s, db, themes, a.limit)))
+        res = asyncio.run(run_live(s, db, themes, a.limit))
+        print(res)
+        if res.get("yielded"):
+            return YIELDED
     elif a.cmd == "bot":
         from .bot import run_bot
         asyncio.run(run_bot(s, db, themes))

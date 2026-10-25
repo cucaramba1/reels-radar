@@ -132,3 +132,13 @@ def test_login_pause_leaves_alert_for_bot(db, tmp_path):
     stats = run(db, tmp_path, fetch=lambda r, w: ("LOGIN", None), local=mk_local(80), classify=ok_classify)
     assert stats["paused"] == 1 and "ig_cookies" in db.kv_get("alert")
     assert (db.get("A")["status"], db.get("A")["attempts"]) == ("new", 0)
+
+
+def test_yield_stops_before_next_item_and_keeps_rest_new(db, tmp_path):
+    db.add_item("A", "u", "c", 1); db.add_item("B", "u2", "c", 2)
+    seen = []
+    def fetch(row, workdir):
+        seen.append(row["code"]); return ok_fetch(row, workdir)
+    st = run(db, tmp_path, fetch=fetch, local=mk_local(80), classify=ok_classify, yield_check=lambda: len(seen) >= 1)
+    assert st["yielded"] == 1 and len(seen) == 1
+    assert sorted(db.get(c)["status"] for c in ("A", "B")) == ["draft", "new"]

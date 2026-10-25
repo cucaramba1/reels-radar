@@ -4,6 +4,7 @@ import random
 import time
 from datetime import datetime
 
+from ..slot import should_yield
 from .cleanup import record_activity
 from .db import SourcesDB
 
@@ -11,7 +12,7 @@ BENIGN = {"NOT_FOUND"}  # аккаунт удалён: не повод оста�
 
 
 def verify_batch(sdb: SourcesDB, reader, now: datetime, years: int = 2, limit: int = 20,
-                 sleep=time.sleep, pause=(1.0, 2.5)) -> dict:
+                 sleep=time.sleep, pause=(1.0, 2.5), yield_check=should_yield) -> dict:
     rows = sdb.c.execute(
         "SELECT username FROM accounts WHERE needs_verify=1 AND followed=1 AND saved_count=0 "
         "AND status NOT IN ('personal', 'ignored') "
@@ -19,6 +20,9 @@ def verify_batch(sdb: SourcesDB, reader, now: datetime, years: int = 2, limit: i
         "(last_post_at IS NULL), last_post_at ASC, username LIMIT ?", (limit,)).fetchall()
     res = {"active": 0, "inactive": 0, "unknown": 0, "stopped": None}
     for r in rows:
+        if yield_check():
+            res["stopped"] = "YIELD"
+            break
         u = r["username"]
         a = reader(u)
         sdb.log_check(u, a.error or "ok")

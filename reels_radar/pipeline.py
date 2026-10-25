@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .claude import is_limit
 from .review import save_verdict
+from .slot import should_yield
 
 MAX_ATTEMPTS = 3
 PAUSE_ALERT = {
@@ -18,7 +19,8 @@ def _is_reel(url: str) -> bool:
     return "/reel/" in url or "/reels/" in url or "/tv/" in url
 
 
-async def run_batch(s, db, themes, *, fetch, local, classify, limit=None, light=False) -> dict[str, int]:
+async def run_batch(s, db, themes, *, fetch, local, classify, limit=None, light=False,
+                    yield_check=should_yield) -> dict[str, int]:
     """light: мало диска. Видео ждут следующей ночи без штрафа, карусели и фото разбираются как обычно."""
     db.kv_set("paused", "0")  # пауза живёт один прогон, следующий продолжает сам
     n = limit or 1000
@@ -26,6 +28,9 @@ async def run_batch(s, db, themes, *, fetch, local, classify, limit=None, light=
     rows = [r for r in rows if r["attempts"] < MAX_ATTEMPTS][: limit or None]
     stats = {"draft": 0, "archived": 0, "no_video": 0, "failed": 0, "paused": 0, "deferred": 0}
     for r in rows:
+        if yield_check():
+            stats["yielded"] = 1  # остальные остаются new, следующий прогон продолжит
+            break
         code = r["code"]
         if light and _is_reel(r["url"]):
             stats["deferred"] += 1  # статус и попытки не трогаем
