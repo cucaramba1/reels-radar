@@ -58,7 +58,7 @@ def test_image_post_uses_images_and_skips_whisper(tmp_path, monkeypatch):
     def boom(*a, **k): raise AssertionError("whisper must not run for images")
     monkeypatch.setattr(local, "transcribe", boom)
     class S:
-        max_frames = 6; reels_tools = tmp_path; whisper_bin = "w"; whisper_model = "m"; keywords = []
+        max_frames = 6; reels_tools = tmp_path; ocr_bin = None; whisper_bin = "w"; whisper_model = "m"; keywords = []
     lr = local.analyze_local(S(), tmp_path, tmp_path / "work", "подпись")
     assert lr.transcript == "" and "текст слайда" in lr.ocr_text and len(lr.frames) == 2
 

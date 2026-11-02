@@ -48,14 +48,23 @@ def fetch_gallerydl(url: str, dest: Path, cookies: Path) -> str:
     return "OK" if p.returncode == 0 else (_classify(p.stderr + p.stdout) or "NO_VIDEO")
 
 
+def _kill_tree(p: subprocess.Popen) -> None:
+    if sys.platform == "win32":  # killpg нет: taskkill /T гасит и дерево (node-драйвер с Chromium)
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True)
+    else:
+        os.killpg(p.pid, signal.SIGKILL)
+
+
 def fetch_playwright(url: str, dest: Path, script: Path, profile: Path) -> str:
     # своя группа процессов: по таймауту гасим и node-драйвер с Chromium, иначе они живут и держат профиль
+    group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if sys.platform == "win32"
+             else {"start_new_session": True})
     p = subprocess.Popen([sys.executable, str(script), url, str(dest), str(profile)],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **group)
     try:
         code = p.wait(timeout=300)
     except subprocess.TimeoutExpired:
-        os.killpg(p.pid, signal.SIGKILL)
+        _kill_tree(p)
         p.wait()
         return "NO_VIDEO"
     return {0: "OK", 2: "LOGIN", 3: "RATE"}.get(code, "NO_VIDEO")

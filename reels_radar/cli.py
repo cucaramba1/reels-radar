@@ -18,6 +18,14 @@ def root() -> Path:
     return Path(os.environ.get("REELS_RADAR_ROOT") or Path(__file__).resolve().parent.parent)
 
 
+def _run_is_active() -> bool:
+    """Идёт ли `reels_radar run` (pgrep на Windows нет, поэтому psutil)."""
+    import psutil
+    me = os.getpid()
+    return any(p.pid != me and "reels_radar run" in " ".join(p.info["cmdline"] or ()).replace("-m reels_radar", "reels_radar")
+               for p in psutil.process_iter(["cmdline"]))
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="reels-radar")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -48,10 +56,9 @@ def main(argv=None) -> int:
         elif a.scmd == "flag":
             print("отложено на проверку:", flag_for_verification(sdb, _dt.now(), s.cleanup_years))
         elif a.scmd == "verify":
-            import subprocess
             from .sources.reader import ProfileReader
             from .sources.verify import budget_left, verify_batch
-            if subprocess.run(["pgrep", "-f", "reels_radar run"], capture_output=True).stdout.strip():
+            if _run_is_active():
                 print("идёт run_all: профили Instagram читать нельзя (один клиент), проверка не запущена")
                 return 1
             left = min(a.limit, budget_left(sdb, s.verify_daily_budget, _dt.now()))

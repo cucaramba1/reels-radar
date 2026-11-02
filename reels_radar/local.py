@@ -155,5 +155,5 @@ def analyze_local(s: Settings, video: Path, workdir: Path, caption: str = "") ->
             times = shot_times(scene_cuts(video), _duration(video))
             frames = frames_at(video, workdir / "frames", times) if len(times) > s.max_frames else []
         frames = frames or extract_frames(video, workdir / "frames", s.max_frames)
-    ocr_text = " / ".join(clean_lines(run_ocr(s.reels_tools / "ocr", frames)))
+    ocr_text = " / ".join(clean_lines(run_ocr(s.ocr_bin or s.reels_tools / "ocr", frames)))
     return LocalResult(transcript, ocr_text, score(transcript, ocr_text, caption, s.keywords), frames)

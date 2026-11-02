@@ -30,7 +30,8 @@ async def run_claude(s: Settings, prompt: str, *, system: str, schema: dict | No
     if schema is not None:
         args += ["--json-schema", json.dumps(schema, ensure_ascii=False)]
     s.data_dir.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "PATH": f"{os.path.dirname(s.claude_bin)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
+    sysdirs = [] if os.name == "nt" else ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+    env = {**os.environ, "PATH": os.pathsep.join([os.path.dirname(s.claude_bin), *sysdirs] + ([os.environ.get("PATH", "")] if os.name == "nt" else []))}
     try:
         proc = await asyncio.create_subprocess_exec(
             *args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
