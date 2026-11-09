@@ -79,8 +79,14 @@ def router(s, db, themes, sdb=None) -> Router:
             pack = rows[i:i + 10]
             links = "\n".join(f"https://instagram.com/{r['username']}" for r in pack)
             names = " ".join(r["username"] for r in pack)
-            await m.answer(f"{links}\n\nотписался, жми и отправь:\n<code>/done {names}</code>",
+            await m.answer(f"{links}\n\nотписался, жми и отправь:\n<code>/done {names}</code>\n\n"
+                           f"решил оставить, жми и отправь:\n<code>/skip {names}</code>",
                            parse_mode="HTML", disable_web_page_preview=True)
+
+    @rt.message(Command("skip"), owner)
+    async def skip(m: Message):
+        users = (m.text or "").split()[1:]
+        await m.answer(", ".join(f"{u}: {acc_action(sdb, u, 'keep')}" for u in users) or "укажи юзернеймы")
 
     @rt.message(Command("done"), owner)
     async def done(m: Message):
