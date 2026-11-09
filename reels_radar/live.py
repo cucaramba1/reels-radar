@@ -4,7 +4,7 @@ import shutil
 from functools import partial
 from pathlib import Path
 
-from .fetch import fetch_chain, fetch_gallerydl, fetch_playwright, fetch_ytdlp
+from .fetch import fetch_chain, fetch_gallerydl, fetch_playwright, fetch_ytdlp, login_is_per_post
 from .local import analyze_local
 from .pipeline import run_batch
 from .vision import classify
@@ -19,12 +19,14 @@ async def run_live(s, db, themes, limit=None):
     light = free < s.light_below_gb or (Path.home() / "Claude Code/tools/resource-guard/state/diskcap-reels-radar").exists()
     cookies = s.reels_tools / "ig_cookies.txt"
     pw = (s.root / "scripts" / "pw_fetch.py", s.data_dir / "pw-profile")
-    chain = [partial(fetch_ytdlp, cookies=cookies),
-             lambda u, d: fetch_playwright(u, d, *pw),
-             partial(fetch_gallerydl, cookies=cookies)]
+    chain = [partial(fetch_ytdlp, cookies=cookies)]
+    if pw[1].exists():  # профиль Chromium с логином есть только дома
+        chain.append(lambda u, d: fetch_playwright(u, d, *pw))
+    chain.append(partial(fetch_gallerydl, cookies=cookies))
 
     def fetch(row, work):
-        return fetch_chain(row["url"], work, chain)
+        st, video = fetch_chain(row["url"], work, chain)
+        return login_is_per_post(st, cookies.exists()), video
 
     def local(video, work, caption):
         return analyze_local(s, video, work, caption)

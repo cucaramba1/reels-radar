@@ -36,14 +36,19 @@ def _classify(err: str) -> str | None:
     return None
 
 
+def _cookie_args(cookies) -> list[str]:
+    """Куки есть только дома. На сервере их нет и не должно быть: публичные рилсы yt-dlp берёт без них (проба 07.11)."""
+    return ["--cookies", str(cookies)] if cookies and Path(cookies).exists() else []
+
+
 def fetch_ytdlp(url: str, dest: Path, cookies: Path) -> str:
-    p = subprocess.run(["yt-dlp", "--cookies", str(cookies), "-o", str(dest / "%(id)s.%(ext)s"), url],
+    p = subprocess.run(["yt-dlp", *_cookie_args(cookies), "-o", str(dest / "%(id)s.%(ext)s"), url],
                        capture_output=True, text=True, timeout=300)
     return "OK" if p.returncode == 0 else (_classify(p.stderr + p.stdout) or "NO_VIDEO")
 
 
 def fetch_gallerydl(url: str, dest: Path, cookies: Path) -> str:
-    p = subprocess.run(["gallery-dl", "--cookies", str(cookies), "-D", str(dest), url],
+    p = subprocess.run(["gallery-dl", *_cookie_args(cookies), "-D", str(dest), url],
                        capture_output=True, text=True, timeout=300)
     return "OK" if p.returncode == 0 else (_classify(p.stderr + p.stdout) or "NO_VIDEO")
 
@@ -68,6 +73,12 @@ def fetch_playwright(url: str, dest: Path, script: Path, profile: Path) -> str:
         p.wait()
         return "NO_VIDEO"
     return {0: "OK", 2: "LOGIN", 3: "RATE"}.get(code, "NO_VIDEO")
+
+
+def login_is_per_post(status: str, has_cookies: bool) -> str:
+    """Дома LOGIN значит «сессия в куках умерла» и ночь встаёт на паузу. Без куки (сервер) логин нужен конкретному посту
+    (карусель, закрытый, возрастной): это обычное «видео не скачалось», остальные рилсы ночи идут дальше."""
+    return "NO_VIDEO" if status == "LOGIN" and not has_cookies else status
 
 
 def fetch_chain(url: str, dest: Path, fetchers: list[Fetcher]) -> tuple[str, Path | None]:

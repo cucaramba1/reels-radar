@@ -75,3 +75,19 @@ def test_has_video_stream_real_ffprobe(tmp_path):
     subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=d=1", str(a)], check=True)
     subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=64x64:d=1", str(v)], check=True)
     assert REAL_PROBE(v) is True and REAL_PROBE(a) is False
+
+
+def test_cookie_args_only_when_file_exists(tmp_path):
+    from reels_radar.fetch import _cookie_args
+    f = tmp_path / "ig_cookies.txt"
+    assert _cookie_args(f) == []  # сервер: куки нет, yt-dlp идёт без них
+    f.write_text("x")
+    assert _cookie_args(f) == ["--cookies", str(f)]
+
+
+def test_login_pauses_night_only_when_cookies_exist():
+    from reels_radar.fetch import login_is_per_post
+    assert login_is_per_post("LOGIN", has_cookies=True) == "LOGIN"       # дома: сессия умерла, пауза
+    assert login_is_per_post("LOGIN", has_cookies=False) == "NO_VIDEO"   # сервер: этому посту нужен логин, остальные идут
+    assert login_is_per_post("RATE", has_cookies=False) == "RATE"        # лимит Instagram паузит везде
+    assert login_is_per_post("OK", has_cookies=False) == "OK"

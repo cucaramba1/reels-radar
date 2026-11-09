@@ -12,6 +12,8 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest>=9.1.1"]
+# сервер (uv sync --group server): скачивание без куки и OCR, на ноуте не нужны
+server = ["yt-dlp", "gallery-dl", "rapidocr>=3.10", "onnxruntime>=1.20", "pillow"]
 
 [tool.uv]
 package = false
