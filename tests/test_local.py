@@ -119,3 +119,28 @@ def test_scene_cuts_on_real_ffmpeg(tmp_path):
     # 7 склеек; пару цветов с близкой яркостью детектор при 0.2 может не различить, это не страшно
     assert len(cuts) >= 5 and all(abs(c - round(c / 2) * 2) < 0.3 for c in cuts)
     assert len(shot_times(cuts, 16.0)) == len(cuts)  # крайние полупланы влились в соседей
+
+
+def test_transcribe_groq_filters_music_hallucination_and_keeps_speech(tmp_path, monkeypatch):
+    from reels_radar import local
+    mp4 = tmp_path / "v.mp4"; mp4.write_bytes(b"x")
+    monkeypatch.setenv("GROQ_API_KEY", "k")
+    monkeypatch.setattr(local, "has_audio", lambda v: True)
+    monkeypatch.setattr(local.subprocess, "run", lambda a, **kw: (tmp_path / "w" / "v.mp3").write_bytes(b"mp3"))
+    speech = {"text": "Сегодня разберём, как настроить скилл в Claude Code за пять минут", "segments": [
+        {"no_speech_prob": 0.01, "avg_logprob": -0.2}]}
+    monkeypatch.setattr(local, "_groq_request", lambda audio, key: speech)
+    assert local.transcribe_groq(mp4, tmp_path / "w").startswith("Сегодня разберём")
+    music = {"text": "Продолжение следует...", "segments": [{"no_speech_prob": 0.9, "avg_logprob": -1.2}]}
+    monkeypatch.setattr(local, "_groq_request", lambda audio, key: music)
+    assert local.transcribe_groq(mp4, tmp_path / "w") == ""
+
+
+def test_transcribe_groq_without_key_fails_loudly(tmp_path, monkeypatch):
+    import pytest
+    from reels_radar import local
+    mp4 = tmp_path / "v.mp4"; mp4.write_bytes(b"x")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setattr(local, "has_audio", lambda v: True)
+    with pytest.raises(RuntimeError, match="GROQ_API_KEY"):
+        local.transcribe_groq(mp4, tmp_path / "w")

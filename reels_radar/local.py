@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import time
+import urllib.error
+import urllib.request
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -119,7 +124,11 @@ def transcribe(whisper_bin: str, model: str, video: Path, tmp: Path) -> str:
     f = tmp / (video.stem + ".json")
     if p.returncode != 0 or not f.exists():
         raise RuntimeError(f"whisper failed: {(p.stderr or '')[-200:]}")
-    res = json.loads(f.read_text() or "{}")
+    return _finish(json.loads(f.read_text() or "{}"))
+
+
+def _finish(res: dict) -> str:
+    """Ответ распознавания (Whisper локально или Groq) -> текст; музыка и дежурные фразы дают пустую строку."""
     if is_hallucination(res.get("segments") or []):
         return ""  # музыка без слов: Whisper уверенно выдумывает текст, такой транскрипт хуже пустого
     text = (res.get("text") or "").strip()
@@ -142,6 +151,44 @@ def is_hallucination(segments: list[dict]) -> bool:
     return bool(segments) and bad * 2 >= len(segments)
 
 
+def _groq_request(audio: Path, key: str, tries: int = 4) -> dict:
+    """Groq whisper-large-v3-turbo через urllib (multipart руками, без новых зависимостей). 429: ждём retry-after."""
+    boundary = uuid.uuid4().hex
+    fields = {"model": "whisper-large-v3-turbo", "response_format": "verbose_json", "temperature": "0"}
+    body = b"".join(f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode() for k, v in fields.items())
+    body += (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{audio.name}"\r\n'
+             f'Content-Type: audio/mpeg\r\n\r\n').encode() + audio.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
+    for i in range(tries):
+        rq = urllib.request.Request("https://api.groq.com/openai/v1/audio/transcriptions", body, {
+            "Authorization": f"Bearer {key}", "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": "reels-radar/1.0"})
+        try:
+            with urllib.request.urlopen(rq, timeout=180) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and i < tries - 1:
+                time.sleep(min(float(e.headers.get("retry-after") or 20), 90))
+                continue
+            raise RuntimeError(f"groq {e.code}: {e.read().decode(errors='ignore')[:200]}")
+    raise RuntimeError("groq: попытки кончились")
+
+
+def transcribe_groq(video: Path, tmp: Path) -> str:
+    """Сервер: Mac-овского mlx_whisper нет, речь расшифровывает Groq. Ролики короткие, один запрос без нарезки."""
+    if not has_audio(video):
+        return ""
+    key = os.environ.get("GROQ_API_KEY")
+    if not key:
+        raise RuntimeError("GROQ_API_KEY не задан")
+    tmp.mkdir(parents=True, exist_ok=True)
+    mp3 = tmp / (video.stem + ".mp3")
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(video), "-vn", "-ac", "1", "-ar", "16000",
+                    "-b:a", "48k", str(mp3)], check=True, timeout=300)
+    if mp3.stat().st_size > 24 * 1024 * 1024:
+        raise RuntimeError("аудио больше 24 МБ, нужна нарезка")
+    return _finish(_groq_request(mp3, key))
+
+
 def analyze_local(s: Settings, video: Path, workdir: Path, caption: str = "") -> LocalResult:
     video = Path(video)
     if video.is_dir():  # карусель: слайды вместо кадров, речи нет
@@ -149,7 +196,8 @@ def analyze_local(s: Settings, video: Path, workdir: Path, caption: str = "") ->
         frames = images(video)[: s.max_frames]
         transcript = ""
     else:
-        transcript = transcribe(s.whisper_bin, s.whisper_model, video, workdir / "stt")
+        transcript = (transcribe_groq(video, workdir / "stt") if os.environ.get("STT") == "groq"
+                      else transcribe(s.whisper_bin, s.whisper_model, video, workdir / "stt"))
         frames = []
         if len(transcript) < NO_SPEECH_CHARS:  # без речи весь смысл в кадрах: кадр на каждый план, а не 6 через равные промежутки
             times = shot_times(scene_cuts(video), _duration(video))
