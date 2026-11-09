@@ -109,6 +109,8 @@ DECISION_LABEL = {"idea": "🎬 идея для рилса", "friend": "👥 д�
 
 
 def decision_label(r) -> str:
+    if r["status"] == "queued":
+        return "⏳ в очереди на запись"
     d = r["decision"] or ""
     if d.startswith("note:"):
         return "📝 заметка → " + d[5:]

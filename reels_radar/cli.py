@@ -33,6 +33,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("run"); p.add_argument("--limit", type=int)
     p = sub.add_parser("digest"); p.add_argument("--days", type=int, default=7); p.add_argument("--send", action="store_true")
     sub.add_parser("bot")
+    sub.add_parser("applier")
     sp = sub.add_parser("sources"); ssub = sp.add_subparsers(dest="scmd", required=True)
     pi = ssub.add_parser("import"); pi.add_argument("--export", required=True)
     for n in ("flag", "export", "stats"):
@@ -41,6 +42,11 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     r = root()
     s, themes = load_settings(r), load_themes(r)
+    if a.cmd == "applier":  # ноут: пакеты записи с сервера (reels_radar/packets.py), launchd раз в 5 минут
+        from .config import load_vaults
+        from .packets import run_applier
+        print(run_applier(s, themes, load_vaults(r)))
+        return 0
     if a.cmd == "sources":
         from datetime import datetime as _dt
         from .sources.cleanup import export_cleanup, flag_for_verification
@@ -107,6 +113,8 @@ def main(argv=None) -> int:
         if res.get("yielded"):
             return YIELDED
     elif a.cmd == "bot":
+        import logging
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")  # в журнале видно, какие нажатия дошли
         from .bot import run_bot
         asyncio.run(run_bot(s, db, themes))
     return 0

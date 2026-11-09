@@ -77,8 +77,14 @@ def load_settings(root: Path) -> Settings:
     )
 
 
+def load_vaults(root: Path) -> dict[str, str]:
+    """Дополнительные vault'ы по ключам из themes.yaml. VAULT_<КЛЮЧ> в окружении подменяет путь (сервер: зеркало vault)."""
+    y = yaml.safe_load((root / "config" / "themes.yaml").read_text())
+    return {k: os.environ.get(f"VAULT_{k.upper()}") or _p(v) for k, v in (y.get("vaults") or {}).items()}
+
+
 def load_themes(root: Path) -> dict[str, Theme]:
     y = yaml.safe_load((root / "config" / "themes.yaml").read_text())
-    vaults = {k: _p(v) for k, v in (y.get("vaults") or {}).items()}
+    vaults = load_vaults(root)
     return {n: Theme(n, v.get("folder"), v.get("moc"), vaults.get(v.get("vault")), v.get("canvas"))
             for n, v in y["themes"].items()}
